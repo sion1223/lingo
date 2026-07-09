@@ -1,0 +1,8 @@
+# RunPod PyTorch 템플릿에는 torch 가 이미 설치되어 있음 (없으면 주석 해제)
+# torch>=2.4
+numpy
+transformers>=4.57
+accelerate
+safetensors
+pillow
+matplotlib

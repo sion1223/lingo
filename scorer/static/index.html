@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>일본어 손글씨 채점</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 16px;
+         background: #f7f7f9; color: #222; }
+  h1 { font-size: 1.1rem; margin: 0 0 10px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  canvas { background: #fff; border: 1px solid #ccc; border-radius: 12px;
+           touch-action: none; }
+  .panel { max-width: 380px; }
+  input[type=text] { font-size: 1.4rem; width: 3em; text-align: center; }
+  button { font-size: 1rem; padding: 8px 14px; margin: 4px 4px 4px 0;
+           border-radius: 8px; border: 1px solid #bbb; background: #fff; cursor: pointer; }
+  button.primary { background: #2563eb; color: #fff; border-color: #2563eb; }
+  #score { font-size: 2.2rem; font-weight: 700; }
+  .msg { margin: 6px 0; padding: 8px 10px; background: #fff; border-left: 4px solid #f59e0b;
+         border-radius: 6px; font-size: 0.92rem; }
+  .msg b { color: #b45309; }
+  #status { color: #666; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<h1>일본어 손글씨 채점 — 글자를 따라 쓰세요 (애플펜슬/손가락/마우스)</h1>
+<div class="row">
+  <div>
+    <canvas id="pad" width="400" height="400"></canvas><br>
+    <label>목표 글자 <input id="char" type="text" value="永"></label>
+    <button id="load">불러오기</button>
+    <button id="undo">한 획 지우기</button>
+    <button id="clear">전체 지우기</button>
+    <button id="submit" class="primary">채점하기</button>
+    <div id="status"></div>
+  </div>
+  <div class="panel">
+    <div id="score">--</div>
+    <div id="feedback"></div>
+  </div>
+</div>
+<script>
+const cv = document.getElementById('pad'), ctx = cv.getContext('2d');
+let strokes = [], cur = null, template = null, lastReport = null;
+
+async function loadTemplate() {
+  const ch = document.getElementById('char').value.trim();
+  if (!ch) return;
+  const r = await fetch('/template?char=' + encodeURIComponent(ch));
+  if (!r.ok) { setStatus('글자를 찾을 수 없습니다'); template = null; redraw(); return; }
+  template = (await r.json()).strokes;
+  lastReport = null; strokes = [];
+  setStatus(ch + ' — ' + template.length + '획. 회색 가이드를 따라 쓰세요.');
+  redraw();
+}
+function setStatus(t) { document.getElementById('status').textContent = t; }
+function toCanvas(p) { return [p[0] * cv.width, p[1] * cv.height]; }
+
+function redraw() {
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  // 격자
+  ctx.strokeStyle = '#eee'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cv.width/2, 0); ctx.lineTo(cv.width/2, cv.height);
+  ctx.moveTo(0, cv.height/2); ctx.lineTo(cv.width, cv.height/2);
+  ctx.stroke();
+  // 템플릿 가이드
+  if (template) {
+    ctx.strokeStyle = '#d5d5dc'; ctx.lineWidth = 6; ctx.lineCap = 'round';
+    for (const s of template) drawPath(s.map(toCanvas));
+  }
+  // 사용자 획 (채점 후엔 품질색)
+  strokes.forEach((s, i) => {
+    let color = '#111';
+    if (lastReport && lastReport.strokes[i]) {
+      const q = lastReport.strokes[i].q;
+      color = q > 0.75 ? '#16a34a' : q > 0.5 ? '#d97706' : '#dc2626';
+    }
+    ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.lineCap = 'round';
+    drawPath(s);
+  });
+  if (cur) { ctx.strokeStyle = '#111'; ctx.lineWidth = 4; drawPath(cur); }
+  // 교정 화살표: 사용자 획 중심 -> 매칭된 템플릿 획 중심
+  if (lastReport) {
+    for (const c of lastReport.corrections) {
+      if (c.index < 0 || !c.move) continue;
+      const s = strokes[c.index];
+      const cx = s.reduce((a,p)=>a+p[0],0)/s.length, cy = s.reduce((a,p)=>a+p[1],0)/s.length;
+      const dx = c.move[0]*cv.width, dy = c.move[1]*cv.height;
+      arrow(cx, cy, cx+dx, cy+dy);
+    }
+  }
+}
+function drawPath(pts) {
+  if (pts.length < 2) return;
+  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
+  for (const p of pts.slice(1)) ctx.lineTo(p[0], p[1]);
+  ctx.stroke();
+}
+function arrow(x1,y1,x2,y2) {
+  if (Math.hypot(x2-x1, y2-y1) < 8) return;
+  ctx.strokeStyle = '#e11d48'; ctx.fillStyle = '#e11d48'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  const a = Math.atan2(y2-y1, x2-x1);
+  ctx.beginPath(); ctx.moveTo(x2,y2);
+  ctx.lineTo(x2-10*Math.cos(a-0.4), y2-10*Math.sin(a-0.4));
+  ctx.lineTo(x2-10*Math.cos(a+0.4), y2-10*Math.sin(a+0.4));
+  ctx.fill();
+}
+
+cv.addEventListener('pointerdown', e => {
+  cur = [[e.offsetX, e.offsetY]]; cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', e => {
+  if (!cur) return;
+  cur.push([e.offsetX, e.offsetY]); redraw();
+});
+cv.addEventListener('pointerup', () => {
+  if (cur && cur.length > 1) { strokes.push(cur); lastReport = null; }
+  cur = null; redraw();
+});
+
+document.getElementById('load').onclick = loadTemplate;
+document.getElementById('undo').onclick = () => { strokes.pop(); lastReport = null; redraw(); };
+document.getElementById('clear').onclick = () => { strokes = []; lastReport = null; redraw(); };
+document.getElementById('submit').onclick = async () => {
+  const ch = document.getElementById('char').value.trim();
+  if (!strokes.length) return setStatus('먼저 글자를 써 주세요');
+  setStatus('채점 중...');
+  const r = await fetch('/score', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ char: ch, strokes: strokes.map(s => s.map(p => [p[0]/cv.width, p[1]/cv.height])) }) });
+  const rep = await r.json();
+  if (rep.error) return setStatus('오류: ' + rep.error);
+  // 교정 화살표용 move 복사
+  for (const c of rep.corrections) {
+    if (c.index >= 0) { const e = rep.strokes[c.index]; c.move = e.move; }
+  }
+  lastReport = rep;
+  document.getElementById('score').textContent = rep.score + ' / 100';
+  const fb = document.getElementById('feedback');
+  fb.innerHTML = '';
+  for (const c of rep.corrections) {
+    const div = document.createElement('div'); div.className = 'msg';
+    const tag = c.index >= 0 ? (c.index+1) + '번 획' : '누락';
+    const gain = c.gain ? ` <b>(+${c.gain.toFixed(1)}점)</b>` : '';
+    div.innerHTML = `<b>${tag}</b>${gain}: ${c.messages.join(' / ')}`;
+    fb.appendChild(div);
+  }
+  if (!rep.corrections.length) {
+    const div = document.createElement('div'); div.className = 'msg';
+    div.style.borderColor = '#16a34a'; div.textContent = '아주 잘 썼습니다!';
+    fb.appendChild(div);
+  }
+  setStatus('획별 색: 초록=좋음, 주황=보통, 빨강=교정 필요. 화살표 방향으로 옮기면 점수가 오릅니다.');
+  redraw();
+};
+loadTemplate();
+</script>
+</body>
+</html>
