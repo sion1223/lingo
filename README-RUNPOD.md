@@ -31,9 +31,6 @@ bash runpod_train.sh
 N_CHARS=0 EPOCHS=4 BATCH=24 bash runpod_train.sh        # 전체 문자
 UNFREEZE_LAST=4 bash runpod_train.sh                     # 백본 마지막 4블록도 미세조정
 CHANDRA_ID=datalab-to/chandra-ocr-2 bash runpod_train.sh # Chandra 2 사용
-
-# 경량 스트로크 Transformer 파이프라인(인식 사전학습 -> 채점 전이)도 지원
-MODE=stroke N_CHARS=0 EPOCHS=10 bash runpod_train.sh
 ```
 
 체크포인트는 `checkpoints/` 에 저장된다 (`chandra_scorer.pt` 는 헤드만 저장 —
@@ -51,9 +48,6 @@ model = load_chandra_scorer('checkpoints/chandra_scorer.pt')
 report = analyze_chandra(model, load_char('kanji', '永'), user_strokes)
 print(report['score'], report['corrections'])  # 점수 + "이 획 고치면 +X점"
 ```
-
-경량 스트로크 모델(`scorer.pt`)은 CPU 로컬 추론 가능:
-`python -m scorer.server` 로 웹 데모 실행.
 
 ## 메모
 
