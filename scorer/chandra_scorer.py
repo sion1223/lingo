@@ -55,8 +55,9 @@ class ChandraScorer(nn.Module):
             for b in blocks:
                 b.requires_grad_(True)
         d = d_head
-        self.proj_user = nn.Linear(vis_dim, d)
-        self.proj_tmpl = nn.Linear(vis_dim, d)
+        # 비전 특징 차원은 백본 구현에 따라 다르므로 첫 forward에서 자동 결정
+        self.proj_user = nn.LazyLinear(d)
+        self.proj_tmpl = nn.LazyLinear(d)
         layer = nn.TransformerDecoderLayer(d, nhead, d * 2, 0.1,
                                            batch_first=True, norm_first=True,
                                            activation='gelu')
@@ -77,10 +78,16 @@ class ChandraScorer(nn.Module):
         need_grad = any(p.requires_grad for p in self.visual.parameters())
         with torch.set_grad_enabled(need_grad and self.training):
             out = self.visual(pixel_values, grid_thw=grid_thw)
-        feats = out[0] if isinstance(out, (tuple, list)) else out
-        # 이미지별 토큰 수 = prod(grid)/merge^2 로 분할
-        merge = getattr(self.visual, 'spatial_merge_size', 2) ** 2
-        counts = (grid_thw.prod(dim=1) // merge).tolist()
+        if isinstance(out, (tuple, list)):
+            feats = out[0]
+        elif hasattr(out, 'last_hidden_state'):
+            feats = out.last_hidden_state
+        else:
+            feats = out
+        # 이미지별 토큰 수: 패치수/토큰수 비율을 실측해 분할 (merge 계수에 의존하지 않음)
+        patches = grid_thw.prod(dim=1)
+        ratio = max(int(patches.sum().item()) // feats.shape[0], 1)
+        counts = (patches // ratio).tolist()
         chunks = torch.split(feats, counts)
         return [c.float() for c in chunks]
 
@@ -149,7 +156,7 @@ def strokes_to_inputs(strokes, size=448, grid=None):
     img, masks = render_time_encoded(strokes, size=size)
     u8 = (img.transpose(1, 2, 0) * 255).astype(np.uint8)
     if grid is None:
-        grid = size // 28  # patch14 + 2x2 merge
+        grid = size // 16  # 실측: 448px 입력 -> 28x28 토큰 그리드
     gw = masks_to_grid(masks, grid, grid)
     return u8, gw
 

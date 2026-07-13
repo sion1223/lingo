@@ -105,6 +105,11 @@ def main():
     print(f'loading Chandra vision tower: {args.model_id}', flush=True)
     model = ChandraScorer(model_id=args.model_id, size=args.size,
                           unfreeze_last=args.unfreeze_last).to(dev)
+    # LazyLinear(투영층) 초기화용 더미 forward — 옵티마이저 생성 전에 필요
+    dummy = np.zeros((args.size, args.size, 3), np.uint8)
+    gw0 = torch.zeros(1, 1, (args.size // 16) ** 2)
+    with torch.no_grad():
+        model([dummy], gw0, [dummy], torch.ones(1, 1, dtype=torch.bool))
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f'trainable params: {n_train / 1e6:.2f}M', flush=True)
 
