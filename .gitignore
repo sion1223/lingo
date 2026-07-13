@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .claude/
 demo_feedback.png
+checkpoints/chandra_scorer.pt
