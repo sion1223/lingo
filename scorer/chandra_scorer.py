@@ -134,8 +134,10 @@ class ChandraScorer(nn.Module):
 
     # ---------- 저장/로드 (헤드만 — 백본은 HF에서 다시 받는다) ----------
     def head_state_dict(self):
+        # 헤드 전체 + 백본 중 미세조정(requires_grad)된 파라미터만 저장
+        trainable = {n for n, p in self.named_parameters() if p.requires_grad}
         return {k: v for k, v in self.state_dict().items()
-                if not k.startswith('visual.')}
+                if not k.startswith('visual.') or k in trainable}
 
     def save_heads(self, path):
         torch.save({'heads': {k: v.cpu() for k, v in self.head_state_dict().items()},

@@ -12,7 +12,10 @@ import time
 
 import numpy as np
 import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
 
 from .chandra_scorer import ChandraScorer, strokes_to_inputs
 from .data import load_charset
@@ -89,20 +92,34 @@ def main():
     args = ap.parse_args()
 
     assert torch.cuda.is_available(), 'GPU 필요 (RunPod 등에서 실행하세요)'
-    dev = torch.device('cuda')
+    # torchrun 실행 시 멀티GPU DDP
+    ddp = 'RANK' in os.environ
+    if ddp:
+        dist.init_process_group('nccl')
+        local_rank = int(os.environ['LOCAL_RANK'])
+        torch.cuda.set_device(local_rank)
+        dev = torch.device('cuda', local_rank)
+    else:
+        dev = torch.device('cuda')
+    rank0 = (not ddp) or dist.get_rank() == 0
     torch.manual_seed(0)
 
     charset = load_charset(args.kanji_dir, n_chars=args.n_chars or None,
                            max_strokes=args.max_strokes)
-    print(f'{len(charset)} chars loaded', flush=True)
+    if rank0:
+        print(f'{len(charset)} chars loaded (ddp={ddp}, '
+              f'world={dist.get_world_size() if ddp else 1})', flush=True)
 
     ds = ChandraScoringDataset(charset, size=args.size,
                                samples_per_char=args.samples_per_char)
-    dl = DataLoader(ds, batch_size=args.batch_size, shuffle=True,
-                    collate_fn=collate, num_workers=args.workers,
+    sampler = DistributedSampler(ds, shuffle=True) if ddp else None
+    dl = DataLoader(ds, batch_size=args.batch_size, shuffle=(sampler is None),
+                    sampler=sampler, collate_fn=collate,
+                    num_workers=args.workers,
                     persistent_workers=(args.workers > 0))
 
-    print(f'loading Chandra vision tower: {args.model_id}', flush=True)
+    if rank0:
+        print(f'loading Chandra vision tower: {args.model_id}', flush=True)
     model = ChandraScorer(model_id=args.model_id, size=args.size,
                           unfreeze_last=args.unfreeze_last).to(dev)
     # LazyLinear(투영층) 초기화용 더미 forward — 옵티마이저 생성 전에 필요
@@ -110,11 +127,15 @@ def main():
     gw0 = torch.zeros(1, 1, (args.size // 16) ** 2)
     with torch.no_grad():
         model([dummy], gw0, [dummy], torch.ones(1, 1, dtype=torch.bool))
-    n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f'trainable params: {n_train / 1e6:.2f}M', flush=True)
+    core = model  # 저장/파라미터 그룹용 원본 참조
+    if ddp:
+        model = DDP(model, device_ids=[local_rank])
+    n_train = sum(p.numel() for p in core.parameters() if p.requires_grad)
+    if rank0:
+        print(f'trainable params: {n_train / 1e6:.2f}M', flush=True)
 
-    bb_params = [p for p in model.visual.parameters() if p.requires_grad]
-    head_params = [p for n, p in model.named_parameters()
+    bb_params = [p for p in core.visual.parameters() if p.requires_grad]
+    head_params = [p for n, p in core.named_parameters()
                    if not n.startswith('visual.')]
     groups = [{'params': head_params, 'lr': args.lr}]
     if bb_params:
@@ -125,6 +146,8 @@ def main():
 
     for epoch in range(args.epochs):
         ds.epoch = epoch
+        if sampler is not None:
+            sampler.set_epoch(epoch)
         model.train()
         t0 = time.time()
         agg, seen = {}, 0
@@ -141,14 +164,19 @@ def main():
             seen += 1
             for k, v in parts.items():
                 agg[k] = agg.get(k, 0.0) + v
-            if step % 20 == 0:
+            if rank0 and step % 20 == 0:
                 msg = ' '.join(f'{k}={v / seen:.4f}' for k, v in agg.items())
                 print(f'  ep{epoch} step{step}/{len(dl)} {msg}', flush=True)
-        msg = ' '.join(f'{k}={v / seen:.4f}' for k, v in agg.items())
-        print(f'epoch {epoch}: {msg} ({time.time() - t0:.0f}s)', flush=True)
-        os.makedirs(os.path.dirname(args.out), exist_ok=True)
-        model.save_heads(args.out)
-        print(f'checkpoint -> {args.out}', flush=True)
+        if rank0:
+            msg = ' '.join(f'{k}={v / seen:.4f}' for k, v in agg.items())
+            print(f'epoch {epoch}: {msg} ({time.time() - t0:.0f}s)', flush=True)
+            os.makedirs(os.path.dirname(args.out), exist_ok=True)
+            core.save_heads(args.out)
+            print(f'checkpoint -> {args.out}', flush=True)
+        if ddp:
+            dist.barrier()
+    if ddp:
+        dist.destroy_process_group()
 
 
 if __name__ == '__main__':

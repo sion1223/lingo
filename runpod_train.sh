@@ -11,8 +11,16 @@ EPOCHS="${EPOCHS:-3}"
 BATCH="${BATCH:-16}"
 WORKERS="${WORKERS:-8}"
 
+# GPU 수 자동 감지 -> 2대 이상이면 torchrun(DDP)
+GPUS="${GPUS:-$(nvidia-smi -L | wc -l)}"
+if [ "$GPUS" -gt 1 ]; then
+  LAUNCH="torchrun --nproc_per_node=$GPUS -m"
+else
+  LAUNCH="python -m"
+fi
+
 # Chandra OCR (datalab-to/chandra) 비전 인코더 전이학습
-python -m scorer.train_chandra \
+$LAUNCH scorer.train_chandra \
   --kanji-dir kanji \
   --model-id "${CHANDRA_ID:-datalab-to/chandra}" \
   --n-chars "$N_CHARS" --epochs "$EPOCHS" \
