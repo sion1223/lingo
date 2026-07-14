@@ -13,6 +13,7 @@ import time
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from scorer.chandra_scorer import load_chandra_scorer, analyze_chandra
@@ -31,32 +32,38 @@ app.add_middleware(CORSMiddleware, allow_origins=['*'],
 _model = None
 _loaded_at = None
 _model_kind = None
+_load_error = None
 _lock = threading.Lock()
 
 
 def get_model():
-    global _model, _loaded_at, _model_kind
+    global _model, _loaded_at, _model_kind, _load_error
     with _lock:
         if _model is None:
             t0 = time.time()
-            vision = load_chandra_scorer(CKPT)
-            if os.path.exists(STROKE_CKPT):
-                weights = 0.35
-                if os.path.exists(HYBRID_CONFIG):
-                    with open(HYBRID_CONFIG, encoding='utf-8') as f:
-                        config = json.load(f)
-                        weights = config.get('weights',
-                                             config.get('stroke_weight', weights))
-                if 'STROKE_WEIGHT' in os.environ:
-                    weights = float(os.environ['STROKE_WEIGHT'])
-                stroke = load_stroke_scorer(STROKE_CKPT, device='cpu')
-                _model = HybridScorer(vision, stroke, weights).eval()
-                _model_kind = f'hybrid(weights={_model.stroke_weights})'
-            else:
-                _model = vision
-                _model_kind = 'chandra-only'
-            _model.eval()
-            _loaded_at = time.time() - t0
+            try:
+                vision = load_chandra_scorer(CKPT)
+                if os.path.exists(STROKE_CKPT):
+                    weights = 0.35
+                    if os.path.exists(HYBRID_CONFIG):
+                        with open(HYBRID_CONFIG, encoding='utf-8') as f:
+                            config = json.load(f)
+                            weights = config.get('weights',
+                                                 config.get('stroke_weight', weights))
+                    if 'STROKE_WEIGHT' in os.environ:
+                        weights = float(os.environ['STROKE_WEIGHT'])
+                    stroke = load_stroke_scorer(STROKE_CKPT, device='cpu')
+                    _model = HybridScorer(vision, stroke, weights).eval()
+                    _model_kind = f'hybrid(weights={_model.stroke_weights})'
+                else:
+                    _model = vision
+                    _model_kind = 'chandra-only'
+                _model.eval()
+                _loaded_at = time.time() - t0
+                _load_error = None
+            except Exception as exc:
+                _load_error = f'{type(exc).__name__}: {exc}'
+                raise
     return _model
 
 
@@ -113,11 +120,14 @@ def chars():
 @app.get('/health')
 def health():
     import torch
-    return dict(ok=True, model_loaded=_model is not None,
-                model_kind=_model_kind,
-                cuda=torch.cuda.is_available(),
-                device=torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu',
-                load_seconds=_loaded_at)
+    ok = _model is not None and _load_error is None
+    content = dict(ok=ok, model_loaded=_model is not None,
+                   model_kind=_model_kind, load_error=_load_error,
+                   cuda=torch.cuda.is_available(),
+                   device=torch.cuda.get_device_name(0)
+                   if torch.cuda.is_available() else 'cpu',
+                   load_seconds=_loaded_at)
+    return JSONResponse(content=content, status_code=200 if ok else 503)
 
 
 @app.get('/template/{char}')
@@ -135,7 +145,17 @@ def score(req: ScoreRequest):
         raise HTTPException(400, '한 글자만 보내세요')
     if not os.path.exists(char_to_file(KANJI_DIR, ch)):
         raise HTTPException(404, f'문자 {ch!r} 의 템플릿이 없습니다')
-    if len(req.strokes) > 64 or any(len(stroke) > 4096 for stroke in req.strokes):
+    try:
+        model = get_model()
+    except Exception as exc:
+        raise HTTPException(503, f'모델을 불러오지 못했습니다: {type(exc).__name__}') from exc
+    max_strokes = 64
+    if isinstance(model, HybridScorer):
+        stroke_model = model.stroke_model
+        max_strokes = min(
+            stroke_model.encoder.stroke_emb.num_embeddings,
+            stroke_model.encoder.pos_emb.num_embeddings // 12)
+    if len(req.strokes) > max_strokes or any(len(stroke) > 4096 for stroke in req.strokes):
         raise HTTPException(400, '획 또는 좌표가 너무 많습니다')
     strokes = [np.asarray(s, dtype=np.float64) for s in req.strokes if len(s) >= 2]
     if not strokes:
@@ -144,7 +164,7 @@ def score(req: ScoreRequest):
         raise HTTPException(400, '좌표는 유한한 숫자여야 합니다')
     tmpl = load_char(KANJI_DIR, ch)
     t0 = time.time()
-    report = analyze_chandra(get_model(), tmpl, strokes)
+    report = analyze_chandra(model, tmpl, strokes)
     out = _sanitize(report)
     out['char'] = ch
     out['template'] = [s.tolist() for s in tmpl]

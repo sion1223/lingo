@@ -193,7 +193,9 @@ def analyze_chandra(model, template, raw_user_strokes, top_k=3):
 
     nt = len(template)
     coverage = (nt - len(missing)) / max(nt, 1)
-    score = base * coverage
+    precision = (len(user) - len(extra)) / max(len(user), 1)
+    structure_factor = coverage * precision
+    score = base * structure_factor
 
     strokes_report = []
     for i in range(len(user)):
@@ -206,7 +208,7 @@ def analyze_chandra(model, template, raw_user_strokes, top_k=3):
             fixed = list(user)
             fixed[i] = template[j].copy()
             cf = _score_once(model, fixed, template)
-            entry['gain'] = (float(cf['overall'][0]) - base) * coverage * 100
+            entry['gain'] = (float(cf['overall'][0]) - base) * structure_factor * 100
             entry['move'] = (template[j].mean(0) - user[i].mean(0)).tolist()
             msgs = []
             if entry['rev_prob'] > 0.5 or looks_rev:

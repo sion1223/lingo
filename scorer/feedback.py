@@ -143,7 +143,9 @@ def analyze(model, template, raw_user_strokes, top_k=3):
     # 획 누락 페널티 (모델은 존재하는 획만 보므로 규칙으로 반영)
     nt = len(template)
     coverage = (nt - len(missing)) / max(nt, 1)
-    score = base * coverage
+    precision = (len(user) - len(extra)) / max(len(user), 1)
+    structure_factor = coverage * precision
+    score = base * structure_factor
 
     grad = gradient_directions(model, user, template)
 
@@ -159,7 +161,7 @@ def analyze(model, template, raw_user_strokes, top_k=3):
             fixed = list(user)
             fixed[i] = template[j].copy()
             cf = _model_score(model, fixed, template)
-            entry['gain'] = (float(cf['overall'][0]) - base) * coverage * 100
+            entry['gain'] = (float(cf['overall'][0]) - base) * structure_factor * 100
             # 이동 방향 (정답 중심 - 사용자 중심)
             entry['move'] = (template[j].mean(0) - user[i].mean(0)).tolist()
             msgs = []
