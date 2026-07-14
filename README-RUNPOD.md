@@ -27,6 +27,12 @@ unzip lingo.zip && cd lingo
 # Chandra OCR (datalab-to/chandra) 비전 인코더 전이학습 — 기본
 bash runpod_train.sh
 
+# 좌표 기반 스트로크 Transformer (전체 문자 사전학습 + 채점 미세조정)
+bash runpod_train_stroke.sh
+
+# chandra_scorer.pt가 있으면 홀드아웃 문자에서 앙상블 가중치도 자동 보정한다.
+# 결과: checkpoints/stroke_scorer.pt, checkpoints/hybrid_config.json
+
 # 규모/설정 조절 (환경변수)
 N_CHARS=0 EPOCHS=4 BATCH=24 bash runpod_train.sh        # 전체 문자
 UNFREEZE_LAST=4 bash runpod_train.sh                     # 백본 마지막 4블록도 미세조정

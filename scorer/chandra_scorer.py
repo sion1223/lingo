@@ -165,6 +165,8 @@ def strokes_to_inputs(strokes, size=448, grid=None):
 
 @torch.no_grad()
 def _score_once(model, user, template):
+    if hasattr(model, 'score_strokes'):
+        return model.score_strokes(user, template)
     uimg, ugw = strokes_to_inputs(user, model.size)
     timg, _ = strokes_to_inputs(template, model.size)
     S = len(user)

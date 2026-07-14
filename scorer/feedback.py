@@ -13,6 +13,8 @@ from .data import featurize, POINTS_PER_STROKE
 from .kanjivg import resample_stroke, normalize_strokes
 from .synth import stroke_errors
 
+UNMATCHED_PENALTY = 0.24
+
 
 def _to_batch(strokes):
     f, s = featurize(strokes)
@@ -28,8 +30,52 @@ def prepare_user_strokes(raw_strokes, points_per_stroke=POINTS_PER_STROKE):
     return normalize_strokes(strokes)
 
 
+def _linear_sum_assignment(cost):
+    """작은 직사각 비용 행렬용 Hungarian 알고리즘 (row <= column)."""
+    n, m = cost.shape
+    if n > m:
+        cols, rows = _linear_sum_assignment(cost.T)
+        return rows, cols
+    u = np.zeros(n + 1)
+    v = np.zeros(m + 1)
+    p = np.zeros(m + 1, dtype=int)
+    way = np.zeros(m + 1, dtype=int)
+    for i in range(1, n + 1):
+        p[0] = i
+        minv = np.full(m + 1, np.inf)
+        used = np.zeros(m + 1, dtype=bool)
+        j0 = 0
+        while True:
+            used[j0] = True
+            i0 = p[j0]
+            cur = cost[i0 - 1] - u[i0] - v[1:]
+            candidates = np.where(~used[1:], cur, np.inf)
+            better = candidates < minv[1:]
+            minv[1:][better] = candidates[better]
+            way[1:][better] = j0
+            j1 = int(np.argmin(np.where(used[1:], np.inf, minv[1:]))) + 1
+            delta = minv[j1]
+            u[p[used]] += delta
+            v[used] -= delta
+            minv[~used] -= delta
+            j0 = j1
+            if p[j0] == 0:
+                break
+        while True:
+            j1 = way[j0]
+            p[j0] = p[j1]
+            j0 = j1
+            if j0 == 0:
+                break
+    cols = np.flatnonzero(p[1:])
+    rows = p[1:][cols] - 1
+    return rows, cols
+
+
 def match_strokes(user, template):
-    """탐욕적 매칭: 사용자 획 i -> 템플릿 획 match[i] (비용 = 위치+모양 오차).
+    """전역 최적 매칭: 사용자 획 i -> 템플릿 획 match[i].
+
+    더 나쁜 억지 매칭보다 획 누락/추가로 처리할 수 있도록 dummy 항목을 둔다.
     반환: match (len=사용자 획수, 값=템플릿 인덱스 or -1), missing(빠진 템플릿 획)."""
     nu, nt = len(user), len(template)
     cost = np.zeros((nu, nt))
@@ -37,18 +83,22 @@ def match_strokes(user, template):
         for j in range(nt):
             pe, se, _ = stroke_errors(user[i], template[j])
             cost[i, j] = 1.2 * pe + se + 0.03 * abs(i - j)
+    # 실획끼리의 비용이 2*penalty보다 크면 각각 extra/missing이 더 싸다.
+    size = nu + nt
+    augmented = np.full((size, size), 1e3)
+    augmented[:nu, :nt] = cost
+    for i in range(nu):
+        augmented[i, nt + i] = UNMATCHED_PENALTY
+    for j in range(nt):
+        augmented[nu + j, j] = UNMATCHED_PENALTY
+    augmented[nu:, nt:] = 0.0
+    rows, cols = _linear_sum_assignment(augmented)
     match = np.full(nu, -1, dtype=int)
     used = set()
-    for _ in range(min(nu, nt)):
-        masked = cost.copy()
-        masked[match >= 0, :] = np.inf
-        if used:
-            masked[:, list(used)] = np.inf
-        i, j = np.unravel_index(np.argmin(masked), masked.shape)
-        if not np.isfinite(masked[i, j]):
-            break
-        match[i] = j
-        used.add(j)
+    for i, j in zip(rows, cols):
+        if i < nu and j < nt:
+            match[i] = j
+            used.add(j)
     missing = [j for j in range(nt) if j not in used]
     return match, missing
 

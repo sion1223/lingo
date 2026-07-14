@@ -1,0 +1,8 @@
+numpy
+transformers>=4.57
+accelerate
+safetensors
+pillow
+fastapi
+uvicorn
+pydantic
