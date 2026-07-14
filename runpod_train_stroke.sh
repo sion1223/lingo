@@ -3,6 +3,12 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+VENV_DIR="${VENV_DIR:-/workspace/lingo-stroke-venv}"
+if [[ ! -d "$VENV_DIR" ]]; then
+  python -m venv --system-site-packages "$VENV_DIR"
+fi
+source "$VENV_DIR/bin/activate"
+export HF_HOME="${HF_HOME:-/workspace/hf}"
 pip install -q -r requirements-runpod.txt
 
 N_CHARS="${N_CHARS:-0}"

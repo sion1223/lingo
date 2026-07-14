@@ -1,0 +1,175 @@
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+device=cuda amp=True chars=6562
+/usr/local/lib/python3.12/dist-packages/torch/nn/modules/transformer.py:392: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+  ep0 0/513 loss=8.9524 acc=0.0000
+  ep0 100/513 loss=8.8472 acc=0.0005
+  ep0 200/513 loss=8.6208 acc=0.0007
+  ep0 300/513 loss=8.4314 acc=0.0008
+  ep0 400/513 loss=8.2521 acc=0.0012
+  ep0 500/513 loss=8.0759 acc=0.0014
+epoch 0: train_acc=0.0015 val_loss=7.0990 val_acc=0.0042 (28s)
+best checkpoint -> checkpoints/stroke_recognizer.pt
+  ep1 0/513 loss=7.1021 acc=0.0078
+  ep1 100/513 loss=6.9761 acc=0.0034
+  ep1 200/513 loss=6.8713 acc=0.0034
+  ep1 300/513 loss=6.7758 acc=0.0036
+  ep1 400/513 loss=6.6895 acc=0.0036
+  ep1 500/513 loss=6.6126 acc=0.0038
+epoch 1: train_acc=0.0039 val_loss=6.1619 val_acc=0.0110 (25s)
+best checkpoint -> checkpoints/stroke_recognizer.pt
+  ep2 0/513 loss=6.1796 acc=0.0117
+  ep2 100/513 loss=6.1249 acc=0.0099
+  ep2 200/513 loss=6.0868 acc=0.0107
+  ep2 300/513 loss=6.0451 acc=0.0120
+  ep2 400/513 loss=6.0008 acc=0.0135
+  ep2 500/513 loss=5.9577 acc=0.0148
+epoch 2: train_acc=0.0150 val_loss=5.6597 val_acc=0.0375 (25s)
+best checkpoint -> checkpoints/stroke_recognizer.pt
+  ep3 0/513 loss=5.6835 acc=0.0352
+  ep3 100/513 loss=5.6342 acc=0.0365
+  ep3 200/513 loss=5.5997 acc=0.0367
+  ep3 300/513 loss=5.5670 acc=0.0386
+  ep3 400/513 loss=5.5347 acc=0.0417
+  ep3 500/513 loss=5.5035 acc=0.0443
+epoch 3: train_acc=0.0447 val_loss=5.2850 val_acc=0.0836 (26s)
+best checkpoint -> checkpoints/stroke_recognizer.pt
+  ep4 0/513 loss=5.2372 acc=0.1094
+  ep4 100/513 loss=5.2681 acc=0.0860
+  ep4 200/513 loss=5.2526 acc=0.0843
+  ep4 300/513 loss=5.2348 acc=0.0855
+  ep4 400/513 loss=5.2187 acc=0.0880
+  ep4 500/513 loss=5.2041 acc=0.0904
+epoch 4: train_acc=0.0905 val_loss=5.1039 val_acc=0.1183 (26s)
+best checkpoint -> checkpoints/stroke_recognizer.pt
+  ep5 0/513 loss=5.1273 acc=0.0977
+  ep5 100/513 loss=5.0998 acc=0.1201
+  ep5 200/513 loss=5.0998 acc=0.1184
+  ep5 300/513 loss=5.0968 acc=0.1187
+  ep5 400/513 loss=5.0947 acc=0.1192
+  ep5 500/513 loss=5.0943 acc=0.1190
+epoch 5: train_acc=0.1188 val_loss=5.0751 val_acc=0.1243 (25s)
+best checkpoint -> checkpoints/stroke_recognizer.pt
+device=cuda amp=True train_chars=5906 val_chars=656
+/usr/local/lib/python3.12/dist-packages/torch/nn/modules/transformer.py:392: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+transferred encoder from checkpoints/stroke_recognizer.pt
+  ep0 0/554 overall=0.0217 q=0.0402 rev=0.7939 ord=0.7723
+  ep0 100/554 overall=0.0194 q=0.0354 rev=0.4815 ord=0.2448
+  ep0 200/554 overall=0.0192 q=0.0349 rev=0.4606 ord=0.2040
+  ep0 300/554 overall=0.0191 q=0.0347 rev=0.4536 ord=0.1896
+  ep0 400/554 overall=0.0191 q=0.0346 rev=0.4499 ord=0.1816
+  ep0 500/554 overall=0.0189 q=0.0345 rev=0.4478 ord=0.1773
+epoch 0: val={'overall_mse': 0.01689551906978212, 'q_mse': 0.03320340023765081, 'rev_accuracy': 0.8442088607594936, 'ord_accuracy': 0.9613291139240506} (52s)
+best checkpoint -> checkpoints/stroke_scorer.pt
+  ep1 0/554 overall=0.0183 q=0.0351 rev=0.4528 ord=0.1475
+  ep1 100/554 overall=0.0148 q=0.0308 rev=0.4336 ord=0.1613
+  ep1 200/554 overall=0.0139 q=0.0297 rev=0.4266 ord=0.1582
+  ep1 300/554 overall=0.0133 q=0.0287 rev=0.4064 ord=0.1567
+  ep1 400/554 overall=0.0128 q=0.0275 rev=0.3708 ord=0.1561
+  ep1 500/554 overall=0.0120 q=0.0262 rev=0.3379 ord=0.1542
+epoch 1: val={'overall_mse': 0.005656206787268563, 'q_mse': 0.015779547993140883, 'rev_accuracy': 0.9540822784810127, 'ord_accuracy': 0.9644620253164558} (50s)
+best checkpoint -> checkpoints/stroke_scorer.pt
+  ep2 0/554 overall=0.0075 q=0.0194 rev=0.1728 ord=0.1289
+  ep2 100/554 overall=0.0063 q=0.0174 rev=0.1650 ord=0.1322
+  ep2 200/554 overall=0.0060 q=0.0168 rev=0.1584 ord=0.1283
+  ep2 300/554 overall=0.0058 q=0.0163 rev=0.1536 ord=0.1243
+  ep2 400/554 overall=0.0056 q=0.0158 rev=0.1492 ord=0.1203
+  ep2 500/554 overall=0.0054 q=0.0155 rev=0.1451 ord=0.1167
+epoch 2: val={'overall_mse': 0.0034151310328303314, 'q_mse': 0.010333304103416733, 'rev_accuracy': 0.9682911392405064, 'ord_accuracy': 0.974746835443038} (51s)
+best checkpoint -> checkpoints/stroke_scorer.pt
+  ep3 0/554 overall=0.0048 q=0.0139 rev=0.1272 ord=0.1201
+  ep3 100/554 overall=0.0044 q=0.0134 rev=0.1225 ord=0.0960
+  ep3 200/554 overall=0.0044 q=0.0132 rev=0.1203 ord=0.0903
+  ep3 300/554 overall=0.0043 q=0.0130 rev=0.1188 ord=0.0863
+  ep3 400/554 overall=0.0042 q=0.0129 rev=0.1167 ord=0.0827
+  ep3 500/554 overall=0.0042 q=0.0127 rev=0.1147 ord=0.0803
+epoch 3: val={'overall_mse': 0.004249400970321603, 'q_mse': 0.009313636701318281, 'rev_accuracy': 0.9719620253164557, 'ord_accuracy': 0.985506329113924} (51s)
+  ep4 0/554 overall=0.0034 q=0.0119 rev=0.1035 ord=0.0699
+  ep4 100/554 overall=0.0038 q=0.0117 rev=0.1021 ord=0.0664
+  ep4 200/554 overall=0.0037 q=0.0116 rev=0.1015 ord=0.0654
+  ep4 300/554 overall=0.0036 q=0.0115 rev=0.1004 ord=0.0641
+  ep4 400/554 overall=0.0036 q=0.0114 rev=0.0988 ord=0.0629
+  ep4 500/554 overall=0.0035 q=0.0113 rev=0.0979 ord=0.0619
+epoch 4: val={'overall_mse': 0.0035172076952620975, 'q_mse': 0.00827621496176418, 'rev_accuracy': 0.9751898734177216, 'ord_accuracy': 0.9888607594936709} (51s)
+  ep5 0/554 overall=0.0033 q=0.0112 rev=0.1044 ord=0.0513
+  ep5 100/554 overall=0.0032 q=0.0108 rev=0.0927 ord=0.0544
+  ep5 200/554 overall=0.0032 q=0.0107 rev=0.0918 ord=0.0543
+  ep5 300/554 overall=0.0032 q=0.0106 rev=0.0910 ord=0.0538
+  ep5 400/554 overall=0.0032 q=0.0106 rev=0.0908 ord=0.0532
+  ep5 500/554 overall=0.0032 q=0.0105 rev=0.0903 ord=0.0525
+epoch 5: val={'overall_mse': 0.002996351848151989, 'q_mse': 0.007400127060805695, 'rev_accuracy': 0.9768037974683544, 'ord_accuracy': 0.9899367088607595} (50s)
+best checkpoint -> checkpoints/stroke_scorer.pt
+  ep6 0/554 overall=0.0031 q=0.0098 rev=0.0881 ord=0.0438
+  ep6 100/554 overall=0.0031 q=0.0102 rev=0.0876 ord=0.0501
+  ep6 200/554 overall=0.0030 q=0.0102 rev=0.0868 ord=0.0495
+  ep6 300/554 overall=0.0030 q=0.0101 rev=0.0867 ord=0.0492
+  ep6 400/554 overall=0.0030 q=0.0101 rev=0.0862 ord=0.0489
+  ep6 500/554 overall=0.0030 q=0.0101 rev=0.0857 ord=0.0486
+epoch 6: val={'overall_mse': 0.0031681101848712056, 'q_mse': 0.007294050666350352, 'rev_accuracy': 0.9774683544303797, 'ord_accuracy': 0.9909810126582278} (52s)
+  ep7 0/554 overall=0.0023 q=0.0097 rev=0.0807 ord=0.0514
+  ep7 100/554 overall=0.0029 q=0.0099 rev=0.0841 ord=0.0471
+  ep7 200/554 overall=0.0029 q=0.0099 rev=0.0836 ord=0.0474
+  ep7 300/554 overall=0.0029 q=0.0099 rev=0.0834 ord=0.0467
+  ep7 400/554 overall=0.0029 q=0.0099 rev=0.0834 ord=0.0466
+  ep7 500/554 overall=0.0029 q=0.0098 rev=0.0830 ord=0.0465
+epoch 7: val={'overall_mse': 0.0032715654318652503, 'q_mse': 0.007206504993800876, 'rev_accuracy': 0.9779430379746835, 'ord_accuracy': 0.9911708860759494} (51s)
+  ep8 0/554 overall=0.0024 q=0.0099 rev=0.0853 ord=0.0544
+  ep8 100/554 overall=0.0029 q=0.0098 rev=0.0835 ord=0.0455
+  ep8 200/554 overall=0.0028 q=0.0097 rev=0.0819 ord=0.0451
+  ep8 300/554 overall=0.0028 q=0.0097 rev=0.0819 ord=0.0457
+  ep8 400/554 overall=0.0028 q=0.0097 rev=0.0818 ord=0.0456
+  ep8 500/554 overall=0.0028 q=0.0097 rev=0.0819 ord=0.0457
+epoch 8: val={'overall_mse': 0.0032386431618162044, 'q_mse': 0.007188651969161215, 'rev_accuracy': 0.9776582278481013, 'ord_accuracy': 0.9912341772151899} (51s)
+early stopping after 3 stale epochs
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+Fetching 4 files:   0%|          | 0/4 [00:00<?, ?it/s]Fetching 4 files:  25%|██▌       | 1/4 [01:55<05:47, 115.77s/it]Fetching 4 files: 100%|██████████| 4/4 [01:55<00:00, 28.94s/it] 
+Loading weights:   0%|          | 0/750 [00:00<?, ?it/s]Loading weights:  99%|█████████▉| 741/750 [00:00<00:00, 7404.78it/s]Loading weights: 100%|██████████| 750/750 [00:00<00:00, 7418.35it/s]
+/usr/local/lib/python3.12/dist-packages/torch/nn/modules/transformer.py:392: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+calibration 0/256
+calibration 25/256
+calibration 50/256
+calibration 75/256
+calibration 100/256
+calibration 125/256
+calibration 150/256
+calibration 175/256
+calibration 200/256
+calibration 225/256
+calibration 250/256
+{
+  "weights": {
+    "overall": 0.5936081973307841,
+    "q": 0.841346872198595,
+    "rev": 1.0,
+    "ord": 1.0
+  },
+  "samples": 256,
+  "seed": 20260714,
+  "train_split_seed": 23,
+  "metrics": {
+    "overall": {
+      "chandra": 0.004725973674382759,
+      "stroke": 0.0032344144457764207,
+      "hybrid": 0.0019186246791140836
+    },
+    "q": {
+      "chandra": 0.01903626412789263,
+      "stroke": 0.007482766019374073,
+      "hybrid": 0.0070567902939036135
+    },
+    "rev": {
+      "chandra": 0.13310510201546247,
+      "stroke": 0.01815700243114808,
+      "hybrid": 0.01815700243114808
+    },
+    "ord": {
+      "chandra": 0.04056462734902708,
+      "stroke": 0.011266210103567074,
+      "hybrid": 0.011266210103567074
+    }
+  }
+}
+stroke training done: checkpoints/stroke_recognizer.pt checkpoints/stroke_scorer.pt

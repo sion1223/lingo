@@ -42,6 +42,16 @@ CHANDRA_ID=datalab-to/chandra-ocr-2 bash runpod_train.sh # Chandra 2 사용
 체크포인트는 `checkpoints/` 에 저장된다 (`chandra_scorer.pt` 는 헤드만 저장 —
 백본은 추론 시 HF에서 다시 로드).
 
+## 스트로크 모델 학습 결과 (2026-07-15)
+
+- 환경: RunPod RTX 3090 24GB, 전체 6,562자
+- 인식 사전학습: 6에폭, 검증 정확도 12.43%
+- 채점기 최적 홀드아웃 성능: overall MSE 0.002996, 획 품질 MSE 0.007400,
+  방향 정확도 97.68%, 순서 정확도 98.99%
+- 256자 결합 보정 overall MSE:
+  Chandra 0.004726 → 스트로크 0.003234 → 하이브리드 **0.001919**
+- 보정 가중치(스트로크 비중): overall 0.5936, q 0.8413, 방향 1.0, 순서 1.0
+
 ## 4. 결과 회수 및 추론
 
 `checkpoints/chandra_scorer.pt` 를 다운로드한 뒤 (GPU 서버에서):
