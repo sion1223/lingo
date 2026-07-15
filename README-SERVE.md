@@ -7,10 +7,12 @@
                      (그리기 UI, 항상 켜짐)   (프록시+기록, 항상 켜짐)   (모델 추론, on/off)
 ```
 
-- **웹앱**: https://l8faq6mx5shxpc-8000.proxy.runpod.net/
+- **웹앱 (짧은 링크)**: https://tnsxhhdmnbhgzqgwosto.supabase.co/functions/v1/lingo
   (아이패드 Safari에서 열고 "홈 화면에 추가"하면 앱처럼 사용 가능.
-  supabase.co 도메인은 HTML 렌더링을 차단해서 페이지는 pod가 직접 서빙 —
-  https://tnsxhhdmnbhgzqgwosto.supabase.co/functions/v1/app 은 여기로 리다이렉트)
+  실제 페이지는 RunPod pod가 직접 서빙하며 위 주소는 302 리다이렉트 —
+  원본 주소: https://l8faq6mx5shxpc-8000.proxy.runpod.net/
+  supabase.co 도메인 자체는 HTML을 렌더링하지 않고 항상 리다이렉트만 하므로
+  pod가 꺼져 있으면 이 링크도 접속이 안 됨)
 - **RunPod pod**: `lingo-scorer` (ID `l8faq6mx5shxpc`, NVIDIA L4 24GB, secure cloud EU-RO-1)
 - **채점 서버 직접 주소**: https://l8faq6mx5shxpc-8000.proxy.runpod.net/health
 - **제출 기록**: Supabase `submissions` 테이블 (문자, 획, 점수, 리포트 자동 저장)
