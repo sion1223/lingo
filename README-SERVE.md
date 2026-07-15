@@ -1,0 +1,46 @@
+# 링고 채점 서비스 운영 가이드
+
+## 구성
+
+```
+아이패드(애플펜슬) ──> Supabase app 페이지 ──> Supabase score 함수 ──> RunPod GPU 서버
+                     (그리기 UI, 항상 켜짐)   (프록시+기록, 항상 켜짐)   (모델 추론, on/off)
+```
+
+- **웹앱**: https://l8faq6mx5shxpc-8000.proxy.runpod.net/
+  (아이패드 Safari에서 열고 "홈 화면에 추가"하면 앱처럼 사용 가능.
+  supabase.co 도메인은 HTML 렌더링을 차단해서 페이지는 pod가 직접 서빙 —
+  https://tnsxhhdmnbhgzqgwosto.supabase.co/functions/v1/app 은 여기로 리다이렉트)
+- **RunPod pod**: `lingo-scorer` (ID `l8faq6mx5shxpc`, NVIDIA L4 24GB, secure cloud EU-RO-1)
+- **채점 서버 직접 주소**: https://l8faq6mx5shxpc-8000.proxy.runpod.net/health
+- **제출 기록**: Supabase `submissions` 테이블 (문자, 획, 점수, 리포트 자동 저장)
+
+## 켜기 / 끄기 (과금은 켜져 있는 동안만: 시간당 $0.39 + 볼륨 보관 소액)
+
+- **끄기**: RunPod 콘솔(https://console.runpod.io/pods) → lingo-scorer → Stop
+- **켜기**: 같은 화면에서 Start → 1~2분 뒤 서버 자동 기동(모델 로드 포함 2~3분)
+- Claude에게 "채점 서버 켜줘/꺼줘"라고 해도 됨 (runpod MCP 연결됨)
+- 웹앱 상단 상태표시등: 초록=온라인, 노랑=모델 로드 중, 빨강=꺼짐
+
+pod를 **Stop**하면 GPU 과금이 멈추고 /workspace 볼륨(코드·체크포인트·모델캐시)은
+유지된다. **Terminate**는 볼륨까지 삭제되므로 주의.
+
+## 자동 기동 원리
+
+pod env `JUPYTER_CONFIG_DIR=/workspace/.jupyter` 때문에 부팅 때마다 Jupyter가
+`/workspace/.jupyter/jupyter_server_config.py`를 실행 →
+`/workspace/lingo/serve.sh` → venv 활성화 후 uvicorn(포트 8000) 기동.
+
+## 서버 SSH 접속 (관리용)
+
+```
+ssh -i ~/.ssh/lingo_runpod -p <포트> root@<IP>
+```
+IP/포트는 pod 재시작 때마다 바뀜 — RunPod 콘솔 Connect 탭에서 확인.
+로그: `/workspace/logs/server.log`
+
+## 파일 위치 (pod 볼륨 /workspace)
+
+- `lingo/scorer/` 코드, `lingo/checkpoints/chandra_scorer.pt` 체크포인트
+- `lingo/kanji/` KanjiVG SVG 템플릿
+- `hf/` Chandra 백본 캐시 (~16GB, 첫 로드 때 다운로드 후 재사용)
