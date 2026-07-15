@@ -19,6 +19,12 @@
 
 ## 켜기 / 끄기 (과금은 켜져 있는 동안만: 시간당 $0.39 + 볼륨 보관 소액)
 
+- **Windows 자동 실행(권장)**: `run_lingo.bat` 더블클릭. Pod를 켜고 서버가
+  준비될 때까지 기다린다. 사용을 마친 뒤 Enter/Ctrl+C를 누르거나 창을
+  닫으면 Pod도 자동으로 Stop된다. 첫 실행 때만 RunPod API key를 입력하며,
+  Windows DPAPI로 현재 사용자에게만 복호화되게 저장된다. 키를 바꾸려면
+  `run_lingo.bat -ResetKey`를 실행한다. Pod가 이미 켜져 있으면 현재 로컬 창이
+  제어를 인계하고, 창을 닫을 때 함께 Stop한다.
 - **끄기**: RunPod 콘솔(https://console.runpod.io/pods) → lingo-scorer → Stop
 - **켜기**: 같은 화면에서 Start → 1~2분 뒤 서버 자동 기동(모델 로드 포함 2~3분)
 - Claude에게 "채점 서버 켜줘/꺼줘"라고 해도 됨 (runpod MCP 연결됨)
