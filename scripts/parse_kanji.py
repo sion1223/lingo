@@ -202,9 +202,9 @@ def parse_svg_file(filepath):
 
 
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    kanji_dir = os.path.join(script_dir, "kanji")
-    output_dir = script_dir
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    kanji_dir = os.path.join(repo_root, "kanji")
+    output_dir = repo_root
     
     if not os.path.isdir(kanji_dir):
         print(f"❌ kanji 디렉토리를 찾을 수 없습니다: {kanji_dir}")

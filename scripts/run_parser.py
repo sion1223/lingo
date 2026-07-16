@@ -6,8 +6,9 @@ import importlib.util
 script_dir = os.path.dirname(os.path.abspath(__file__))
 target_script = os.path.join(script_dir, "parse_kanji.py")
 
-# Change working directory so parse_kanji finds "kanji" folder
-os.chdir(script_dir)
+# Change working directory to repo root so parse_kanji finds "kanji" folder
+repo_root = os.path.dirname(script_dir)
+os.chdir(repo_root)
 
 # Import and run
 spec = importlib.util.spec_from_file_location("parse_kanji", target_script)
