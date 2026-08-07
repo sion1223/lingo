@@ -81,6 +81,14 @@ export class ApiClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ char: payload.char, strokes: payload.strokes }),
       };
+    } else if (action === "coach") {
+      url = joinUrl(base, "/coach/stroke");
+      init = {
+        ...init,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      };
     } else {
       throw new RangeError(`unsupported API action: ${action}`);
     }

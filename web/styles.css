@@ -117,14 +117,19 @@ button:focus-visible, input:focus-visible { outline: 3px solid #84adff; outline-
 
 #busy-overlay {
   position: absolute;
-  inset: 0;
+  right: 12px;
+  bottom: 12px;
   z-index: 3;
   display: none;
   align-items: center;
   justify-content: center;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.78);
-  font-size: 16px;
+  padding: 8px 12px;
+  border: 1px solid #d6d0c5;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -257,4 +262,3 @@ button:focus-visible, input:focus-visible { outline: 3px solid #84adff; outline-
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; }
 }
-

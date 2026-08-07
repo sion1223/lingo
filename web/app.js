@@ -4,6 +4,12 @@ import { LocalCoachController, TUTOR_STATES } from "./coach/controller.js";
 import { toLegacyStrokes } from "./coach/local-matcher.js";
 import { clamp, distance, toXY } from "./coach/metrics.js";
 import { CoachOverlay } from "./coach/overlay.js";
+import {
+  buildCoachPayload,
+  chooseHigherConfidence,
+  isMatchingCoachResponse,
+  normalizeCoachResponse,
+} from "./coach/server-refinement.js";
 
 const api = new ApiClient();
 const elements = {
@@ -49,6 +55,14 @@ let lastPartialAnalysisAt = Number.NEGATIVE_INFINITY;
 let allCharacters = "";
 let shownCharacters = 0;
 const characterChunkSize = 400;
+
+function identity(prefix) {
+  if (globalThis.crypto?.randomUUID) return `${prefix}-${globalThis.crypto.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+const sessionId = identity("session");
+let attemptId = identity("attempt");
 
 function escapeHtml(value) {
   return String(value)
@@ -222,6 +236,7 @@ function renderDiagnosis(diagnosis) {
 
 function resetVisibleAttempt(message = "첫 획부터 천천히 써 보세요.") {
   coach.reset(template);
+  attemptId = identity("attempt");
   strokes = [];
   currentStroke = null;
   currentPointerId = null;
@@ -312,9 +327,9 @@ async function loadTemplate({ forceNetwork = true } = {}) {
 async function checkHealth() {
   try {
     const { body } = await api.request("health");
-    if (body.ok && body.model_loaded) {
+    if (body.deep_score_ready || (body.ok && body.model_loaded)) {
       setStatus("on", `최종 채점 서버 온라인 (${body.device || "ready"})`);
-    } else if (body.ok) {
+    } else if (body.coach_ready || body.ok) {
       setStatus("warm", "서버 준비 중 · 로컬 코치는 사용 가능");
     } else {
       setStatus("off", "최종 채점 서버 오프라인 · 로컬 코치는 사용 가능");
@@ -324,10 +339,67 @@ async function checkHealth() {
   }
 }
 
+async function requestServerRefinement({
+  localDiagnosis,
+  acceptedStrokes,
+  completedStroke,
+  expectedTemplateIndex,
+}) {
+  const character = elements.character.value.trim();
+  if (!character) return;
+  coach.lifecycle.abortKind("coach");
+  const token = coach.lifecycle.createRequest("coach");
+  const timeout = setTimeout(() => token.controller.abort(), 2500);
+  const payload = buildCoachPayload({
+    token,
+    sessionId,
+    attemptId,
+    char: character,
+    mode: stage === 1 ? "trace" : "recall",
+    acceptedStrokes,
+    currentStroke: completedStroke,
+    expectedTemplateIndex,
+    localDiagnosis,
+  });
+  try {
+    const { status, body } = await api.request(
+      "coach",
+      payload,
+      { signal: token.controller.signal },
+    );
+    if (
+      status !== 200
+      || !coach.lifecycle.isCurrent(token)
+      || !isMatchingCoachResponse(body, token)
+    ) {
+      return;
+    }
+    const serverDiagnosis = normalizeCoachResponse(body);
+    const selected = chooseHigherConfidence(localDiagnosis, serverDiagnosis);
+    if (
+      selected === serverDiagnosis
+      && coach.applyServerRefinement(token, localDiagnosis, serverDiagnosis)
+    ) {
+      renderDiagnosis(serverDiagnosis);
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      console.warn("server refinement unavailable", error);
+    }
+  } finally {
+    clearTimeout(timeout);
+    coach.lifecycle.finish(token);
+  }
+}
+
 elements.canvas.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "pen") penSeen = true;
   if (penSeen && event.pointerType === "touch") return;
   if (!coach.beginStroke()) return;
+  coach.lifecycle.abortKind("coach");
+  if (coach.lifecycle.abortKind("score")) {
+    elements.busyOverlay.style.display = "none";
+  }
   event.preventDefault();
   lastReport = null;
   elements.result.replaceChildren();
@@ -355,12 +427,24 @@ function endStroke(event) {
   event.preventDefault();
   if (event.type === "pointerup") pushPoint(event);
   const completed = currentStroke;
+  const expectedTemplateIndex = coach.expectedTemplateIndex;
+  const acceptedStrokes = strokes.filter(
+    (_stroke, index) => coach.results[index]?.advancesPrefix,
+  );
   currentStroke = null;
   currentPointerId = null;
   strokes.push(completed);
   const diagnosis = coach.finishStroke(completed);
   redrawInk();
   renderDiagnosis(diagnosis);
+  if (diagnosis) {
+    void requestServerRefinement({
+      localDiagnosis: diagnosis,
+      acceptedStrokes,
+      completedStroke: completed,
+      expectedTemplateIndex,
+    });
+  }
 }
 
 elements.canvas.addEventListener("pointerup", endStroke);
@@ -506,6 +590,8 @@ document.getElementById("go").addEventListener("click", async () => {
     return;
   }
 
+  coach.lifecycle.abortKind("coach");
+  coach.lifecycle.abortKind("score");
   const token = coach.beginFinalScore();
   elements.busyOverlay.style.display = "flex";
   try {

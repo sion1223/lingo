@@ -25,6 +25,17 @@ test("undo, clear, and character changes invalidate stale requests", () => {
   assert.equal(lifecycle.isCurrent(second), false);
 });
 
+test("starting a new stroke can abort only outstanding coach refinements", () => {
+  const lifecycle = new AttemptLifecycle();
+  const coachRequest = lifecycle.createRequest("coach");
+  const templateRequest = lifecycle.createRequest("template");
+
+  assert.equal(lifecycle.abortKind("coach"), 1);
+  assert.equal(coachRequest.controller.signal.aborted, true);
+  assert.equal(lifecycle.isCurrent(coachRequest), false);
+  assert.equal(lifecycle.isCurrent(templateRequest), true);
+});
+
 test("state machine accepts a good stroke and undo restores the expected prefix", () => {
   const coach = new LocalCoachController({ templateStrokes: template });
   assert.equal(coach.machine.state, TUTOR_STATES.READY_TO_DRAW);
@@ -60,4 +71,52 @@ test("geometry fallback without a template does not invent an accepted prefix", 
   assert.equal(diagnosis.accepted, true);
   assert.equal(diagnosis.advancesPrefix, false);
   assert.equal(coach.expectedTemplateIndex, 0);
+});
+
+test("a stale server refinement cannot rewrite the accepted prefix", () => {
+  const coach = new LocalCoachController({ templateStrokes: template });
+  coach.beginStroke();
+  const local = coach.finishStroke(template[0]);
+  const token = coach.lifecycle.createRequest("coach");
+  const refined = {
+    ...local,
+    accepted: false,
+    advancesPrefix: false,
+    nextAction: { type: "retry_current", templateIndex: 0, hintLevel: 0 },
+  };
+
+  coach.lifecycle.abortKind("coach");
+  assert.equal(coach.applyServerRefinement(token, local, refined), false);
+  assert.equal(coach.results.at(-1), local);
+  assert.equal(coach.expectedTemplateIndex, 1);
+});
+
+test("a current server refinement can correct the last local decision", () => {
+  const coach = new LocalCoachController({ templateStrokes: template });
+  coach.beginStroke();
+  const local = coach.finishStroke(template[0]);
+  const token = coach.lifecycle.createRequest("coach");
+  const refined = {
+    ...local,
+    accepted: false,
+    advancesPrefix: false,
+    nextAction: { type: "retry_current", templateIndex: 0, hintLevel: 0 },
+  };
+
+  assert.equal(coach.applyServerRefinement(token, local, refined), true);
+  assert.equal(coach.results.at(-1), refined);
+  assert.equal(coach.expectedTemplateIndex, 0);
+  assert.equal(coach.machine.state, TUTOR_STATES.RETRY_CURRENT_STROKE);
+});
+
+test("final scoring stays non-blocking and a new stroke can cancel it", () => {
+  const coach = new LocalCoachController({ templateStrokes: template });
+  const initialState = coach.machine.state;
+  const scoreRequest = coach.beginFinalScore();
+
+  assert.equal(coach.machine.state, initialState);
+  assert.equal(coach.beginStroke(), true);
+  assert.equal(coach.lifecycle.abortKind("score"), 1);
+  assert.equal(scoreRequest.controller.signal.aborted, true);
+  assert.equal(coach.lifecycle.isCurrent(scoreRequest), false);
 });

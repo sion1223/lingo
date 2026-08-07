@@ -3,6 +3,7 @@
 # /workspace 는 볼륨이라 stop/start 후에도 유지된다.
 cd /workspace/lingo || exit 1
 export HF_HOME=/workspace/hf
+export BUILD_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 mkdir -p /workspace/logs
 
 if [ ! -d /workspace/venv ]; then

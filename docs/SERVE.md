@@ -3,19 +3,28 @@
 ## 구성
 
 ```
-아이패드(애플펜슬) ──> Supabase app 페이지 ──> Supabase score 함수 ──> RunPod GPU 서버
-                     (그리기 UI, 항상 켜짐)   (프록시+기록, 항상 켜짐)   (모델 추론, on/off)
+아이패드(애플펜슬) ──> 항상 켜진 web/ 정적 배포 ──> Supabase score 함수 ──> RunPod GPU 서버
+                     (로컬 코치, Pod 독립)       (프록시+기록)          (경량/심층 추론)
 ```
 
-- **웹앱 (짧은 링크)**: https://tnsxhhdmnbhgzqgwosto.supabase.co/functions/v1/lingo
-  (아이패드 Safari에서 열고 "홈 화면에 추가"하면 앱처럼 사용 가능.
-  실제 페이지는 RunPod pod가 직접 서빙하며 위 주소는 302 리다이렉트 —
-  원본 주소: https://l8faq6mx5shxpc-8000.proxy.runpod.net/
-  supabase.co 도메인 자체는 HTML을 렌더링하지 않고 항상 리다이렉트만 하므로
-  pod가 꺼져 있으면 이 링크도 접속이 안 됨)
+- **웹앱**: `web/` 디렉터리를 항상 켜진 정적 호스트에 한 묶음으로 배포한다. Supabase의
+  안정적인 `lingo` 진입점은 `LINGO_STATIC_APP_URL` 환경변수의 주소로만 리다이렉트하며 HTML을
+  별도로 복사해 갖지 않는다. 따라서 Pod가 Stop이어도 앱 셸과 내장 핵심 5문자 코치는 열린다.
 - **RunPod pod**: `lingo-scorer` (ID `l8faq6mx5shxpc`, NVIDIA L4 24GB, secure cloud EU-RO-1)
-- **채점 서버 직접 주소**: https://l8faq6mx5shxpc-8000.proxy.runpod.net/health
+- **채점 서버 주소**: Supabase `score` 함수의 `RUNPOD_BASE_URL` 환경변수로만 주입한다.
 - **제출 기록**: Supabase `submissions` 테이블 (문자, 획, 점수, 리포트 자동 저장)
+
+## 배포 환경변수
+
+| 위치 | 이름 | 용도 |
+|---|---|---|
+| Supabase `score` 함수 | `RUNPOD_BASE_URL` | RunPod 포트 8000 proxy origin |
+| Supabase `lingo` 함수 | `LINGO_STATIC_APP_URL` | 항상 켜진 정적 `web/` 배포 주소 |
+| RunPod 서버 | `BUILD_SHA` | `/health.build_sha`; `serve.sh`가 현재 HEAD로 자동 설정 |
+| RunPod 서버 | `COACH_ENGINE` | `auto`(기본) 또는 의도적 `geometry-only` 검증 |
+
+정적 HTML에는 배포 과정에서 `window.LINGO_CONFIG = { edgeEndpoint, apiKey }` 또는 동등한
+meta 설정을 주입한다. service role key는 브라우저에 넣지 않는다.
 
 ## 켜기 / 끄기 (과금은 켜져 있는 동안만: 시간당 $0.39 + 볼륨 보관 소액)
 
@@ -38,6 +47,7 @@ pod를 **Stop**하면 GPU 과금이 멈추고 /workspace 볼륨(코드·체크�
 pod env `JUPYTER_CONFIG_DIR=/workspace/.jupyter` 때문에 부팅 때마다 Jupyter가
 `/workspace/.jupyter/jupyter_server_config.py`를 실행 →
 `/workspace/lingo/serve.sh` → venv 활성화 후 uvicorn(포트 8000) 기동.
+`serve.sh`는 uvicorn 전에 checkout의 정확한 SHA를 `BUILD_SHA`로 내보낸다.
 
 ## 서버 SSH 접속 (관리용)
 

@@ -48,6 +48,17 @@ export class AttemptLifecycle {
     return token;
   }
 
+  abortKind(kind) {
+    let aborted = 0;
+    for (const [id, request] of this.requests) {
+      if (request.kind !== kind) continue;
+      request.controller.abort();
+      this.requests.delete(id);
+      aborted += 1;
+    }
+    return aborted;
+  }
+
   isCurrent(token) {
     return Boolean(
       token
@@ -207,6 +218,31 @@ export class LocalCoachController {
     return diagnosis;
   }
 
+  applyServerRefinement(token, localDiagnosis, refinedDiagnosis) {
+    if (!this.lifecycle.isCurrent(token)) return false;
+    const index = this.results.length - 1;
+    if (
+      index < 0
+      || this.results[index] !== localDiagnosis
+      || refinedDiagnosis?.expectedTemplateIndex
+        !== localDiagnosis.expectedTemplateIndex
+    ) {
+      return false;
+    }
+    if (localDiagnosis.advancesPrefix && !refinedDiagnosis.advancesPrefix) {
+      this.expectedTemplateIndex = Math.max(0, this.expectedTemplateIndex - 1);
+    } else if (!localDiagnosis.advancesPrefix && refinedDiagnosis.advancesPrefix) {
+      this.expectedTemplateIndex += 1;
+    }
+    this.results[index] = refinedDiagnosis;
+    this.machine.set(
+      refinedDiagnosis.accepted
+        ? TUTOR_STATES.READY_NEXT_STROKE
+        : TUTOR_STATES.RETRY_CURRENT_STROKE,
+    );
+    return true;
+  }
+
   undoLast() {
     this.lifecycle.invalidate();
     const removed = this.results.pop();
@@ -219,7 +255,6 @@ export class LocalCoachController {
   }
 
   beginFinalScore() {
-    this.machine.finalizing();
     return this.lifecycle.createRequest("score");
   }
 

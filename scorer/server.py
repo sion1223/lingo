@@ -6,21 +6,26 @@ GET  /template/{char}                                          -> 정답 획 궤
 GET  /health                                                   -> 상태 확인
 """
 import json
+import logging
 import os
-from pathlib import Path
 import threading
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from scorer.chandra_scorer import load_chandra_scorer, analyze_chandra
+from scorer.chandra_scorer import analyze_chandra, load_chandra_scorer
 from scorer.hybrid import HybridScorer, load_stroke_scorer
-from scorer.kanjivg import load_char, char_to_file
+from scorer.kanjivg import char_to_file, load_char
+from scorer.realtime import FastCoachEngine, InvalidStroke, TemplateUnavailable
+from scorer.schemas import ApiErrorCode, CoachStrokeRequest, CoachStrokeResponse
 
 KANJI_DIR = os.environ.get('KANJI_DIR', 'kanji')
 CKPT = os.environ.get('CKPT', 'checkpoints/chandra_scorer.pt')
@@ -28,54 +33,157 @@ STROKE_CKPT = os.environ.get('STROKE_CKPT', 'checkpoints/stroke_scorer.pt')
 HYBRID_CONFIG = os.environ.get('HYBRID_CONFIG', 'checkpoints/hybrid_config.json')
 ROOT_DIR = Path(__file__).resolve().parents[1]
 WEB_DIR = ROOT_DIR / 'web'
-
-app = FastAPI(title='lingo-kanji-scorer')
-app.add_middleware(CORSMiddleware, allow_origins=['*'],
-                   allow_methods=['*'], allow_headers=['*'])
-app.mount('/web', StaticFiles(directory=WEB_DIR), name='web')
+LOGGER = logging.getLogger(__name__)
+PROTOCOL_VERSION = 1
+BUILD_SHA = os.environ.get('BUILD_SHA', 'unknown').strip() or 'unknown'
+COACH_ENGINE_MODE = os.environ.get('COACH_ENGINE', 'auto').strip().lower()
+if COACH_ENGINE_MODE not in {'auto', 'geometry-only'}:
+    LOGGER.warning('unknown COACH_ENGINE=%r; using auto', COACH_ENGINE_MODE)
+    COACH_ENGINE_MODE = 'auto'
 
 _model = None
 _loaded_at = None
 _model_kind = None
 _load_error = None
-_lock = threading.Lock()
+_deep_loading = False
+_deep_lock = threading.Lock()
+
+_stroke_model = None
+_stroke_load_attempted = False
+_stroke_load_error = None
+_stroke_lock = threading.Lock()
+
+_coach_engine = None
+_coach_loaded_at = None
+_coach_load_error = None
+_coach_lock = threading.Lock()
+
+
+def get_stroke_model():
+    """Load the small coordinate model once; failure keeps coaching available."""
+    global _stroke_model, _stroke_load_attempted, _stroke_load_error
+    with _stroke_lock:
+        if _stroke_load_attempted:
+            return _stroke_model
+        _stroke_load_attempted = True
+        if not os.path.exists(STROKE_CKPT):
+            _stroke_load_error = 'checkpoint-not-found'
+            return None
+        try:
+            _stroke_model = load_stroke_scorer(STROKE_CKPT, device='cpu')
+            _stroke_load_error = None
+        except Exception as exc:
+            _stroke_load_error = type(exc).__name__
+            LOGGER.exception('lightweight stroke model failed to load')
+    return _stroke_model
+
+
+def get_coach_engine():
+    """Return the cached realtime engine without touching the vision model."""
+    global _coach_engine, _coach_loaded_at, _coach_load_error
+    with _coach_lock:
+        if _coach_engine is None:
+            started = time.perf_counter()
+            try:
+                stroke_model = (
+                    None if COACH_ENGINE_MODE == 'geometry-only'
+                    else get_stroke_model()
+                )
+                _coach_engine = FastCoachEngine(
+                    lambda char: load_char(KANJI_DIR, char),
+                    stroke_model=stroke_model,
+                )
+                _coach_loaded_at = time.perf_counter() - started
+                _coach_load_error = None
+            except Exception as exc:
+                _coach_load_error = type(exc).__name__
+                raise
+    return _coach_engine
+
+
+def _configured_stroke_weight():
+    weights = 0.35
+    if os.path.exists(HYBRID_CONFIG):
+        with open(HYBRID_CONFIG, encoding='utf-8') as file:
+            config = json.load(file)
+        weights = config.get('weights', config.get('stroke_weight', weights))
+    if 'STROKE_WEIGHT' in os.environ:
+        weights = float(os.environ['STROKE_WEIGHT'])
+    return weights
 
 
 def get_model():
-    global _model, _loaded_at, _model_kind, _load_error
-    with _lock:
-        if _model is None:
-            t0 = time.time()
-            try:
-                vision = load_chandra_scorer(CKPT)
-                if os.path.exists(STROKE_CKPT):
-                    weights = 0.35
-                    if os.path.exists(HYBRID_CONFIG):
-                        with open(HYBRID_CONFIG, encoding='utf-8') as f:
-                            config = json.load(f)
-                            weights = config.get('weights',
-                                                 config.get('stroke_weight', weights))
-                    if 'STROKE_WEIGHT' in os.environ:
-                        weights = float(os.environ['STROKE_WEIGHT'])
-                    stroke = load_stroke_scorer(STROKE_CKPT, device='cpu')
-                    _model = HybridScorer(vision, stroke, weights).eval()
-                    _model_kind = f'hybrid(weights={_model.stroke_weights})'
-                else:
-                    _model = vision
-                    _model_kind = 'chandra-only'
-                _model.eval()
-                _loaded_at = time.time() - t0
-                _load_error = None
-            except Exception as exc:
-                _load_error = f'{type(exc).__name__}: {exc}'
-                raise
+    """Load the slower deep scorer used only by the final /score endpoint."""
+    global _model, _loaded_at, _model_kind, _load_error, _deep_loading
+    with _deep_lock:
+        if _model is not None:
+            return _model
+        _deep_loading = True
+        started = time.perf_counter()
+        try:
+            vision = load_chandra_scorer(CKPT)
+            stroke = get_stroke_model()
+            if stroke is not None:
+                _model = HybridScorer(
+                    vision, stroke, _configured_stroke_weight()
+                ).eval()
+                _model_kind = f'hybrid(weights={_model.stroke_weights})'
+            else:
+                _model = vision.eval()
+                _model_kind = 'chandra-only'
+            _loaded_at = time.perf_counter() - started
+            _load_error = None
+        except Exception as exc:
+            _load_error = type(exc).__name__
+            LOGGER.exception('deep scorer failed to load')
+            raise
+        finally:
+            _deep_loading = False
     return _model
 
 
-@app.on_event('startup')
-def _preload():
-    # 서버 기동 직후 백그라운드로 모델 로드 (health 는 즉시 응답)
-    threading.Thread(target=get_model, daemon=True).start()
+def _warm(loader, label):
+    try:
+        loader()
+    except Exception:
+        LOGGER.exception('%s preload failed', label)
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    # The realtime path and deep final scorer warm independently.
+    threading.Thread(
+        target=_warm, args=(get_coach_engine, 'coach'), daemon=True
+    ).start()
+    threading.Thread(
+        target=_warm, args=(get_model, 'deep scorer'), daemon=True
+    ).start()
+    yield
+
+
+app = FastAPI(title='lingo-kanji-scorer', lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=['*'],
+                   allow_methods=['*'], allow_headers=['*'])
+app.mount('/web', StaticFiles(directory=WEB_DIR), name='web')
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error(_request, exc):
+    # Avoid echoing non-finite or otherwise sensitive raw inputs in 422 JSON.
+    details = [
+        {key: value for key, value in error.items() if key not in {'input', 'ctx'}}
+        for error in exc.errors()
+    ]
+    return JSONResponse(
+        status_code=422,
+        content={
+            'detail': {
+                'code': ApiErrorCode.INVALID_REQUEST.value,
+                'message': '요청 형식이 올바르지 않습니다',
+                'errors': details,
+            }
+        },
+    )
 
 
 class ScoreRequest(BaseModel):
@@ -125,14 +233,30 @@ def chars():
 @app.get('/health')
 def health():
     import torch
-    ok = _model is not None and _load_error is None
-    content = dict(ok=ok, model_loaded=_model is not None,
-                   model_kind=_model_kind, load_error=_load_error,
-                   cuda=torch.cuda.is_available(),
-                   device=torch.cuda.get_device_name(0)
-                   if torch.cuda.is_available() else 'cpu',
-                   load_seconds=_loaded_at)
-    return JSONResponse(content=content, status_code=200 if ok else 503)
+    coach_ready = _coach_engine is not None
+    deep_ready = _model is not None and _load_error is None
+    content = dict(
+        ok=coach_ready,
+        protocol_version=PROTOCOL_VERSION,
+        build_sha=BUILD_SHA,
+        coach_ready=coach_ready,
+        coach_engine=_coach_engine.mode if coach_ready else None,
+        coach_load_error=_coach_load_error,
+        coach_load_seconds=_coach_loaded_at,
+        stroke_model_error=_stroke_load_error,
+        deep_score_ready=deep_ready,
+        deep_model_loading=_deep_loading,
+        # Legacy health fields remain available for existing clients.
+        model_loaded=_model is not None,
+        model_kind=_model_kind,
+        load_error=_load_error,
+        cuda=torch.cuda.is_available(),
+        device=(
+            torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu'
+        ),
+        load_seconds=_loaded_at,
+    )
+    return JSONResponse(content=content, status_code=200 if coach_ready else 503)
 
 
 @app.get('/template/{char}')
@@ -141,6 +265,28 @@ def template(char: str):
         raise HTTPException(404, f'문자 {char!r} 의 템플릿이 없습니다')
     strokes = load_char(KANJI_DIR, char)
     return dict(char=char, strokes=[s.tolist() for s in strokes])
+
+
+@app.post('/coach/stroke', response_model=CoachStrokeResponse)
+def coach_stroke(req: CoachStrokeRequest):
+    try:
+        return get_coach_engine().coach(req)
+    except TemplateUnavailable as exc:
+        raise HTTPException(404, {
+            'code': ApiErrorCode.TEMPLATE_UNAVAILABLE.value,
+            'message': '문자 템플릿을 찾지 못했습니다',
+        }) from exc
+    except InvalidStroke as exc:
+        raise HTTPException(400, {
+            'code': ApiErrorCode.INVALID_STROKE.value,
+            'message': str(exc),
+        }) from exc
+    except Exception as exc:
+        LOGGER.exception('realtime stroke coaching failed')
+        raise HTTPException(500, {
+            'code': ApiErrorCode.COACH_FAILED.value,
+            'message': '획을 분석하지 못했습니다',
+        }) from exc
 
 
 @app.post('/score')
@@ -179,5 +325,5 @@ def score(req: ScoreRequest):
 
 if __name__ == '__main__':
     import uvicorn
-    get_model()  # 기동 시 미리 로드
+    get_coach_engine()
     uvicorn.run(app, host='0.0.0.0', port=8000)
