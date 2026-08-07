@@ -1,353 +1,62 @@
 <!doctype html>
 <html lang="ko">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<title>링고 — 한자 필기 채점</title>
-<style>
-  * { box-sizing: border-box; margin: 0; }
-  body { font-family: -apple-system, "Apple SD Gothic Neo", sans-serif;
-         background: #f5f3ee; color: #2b2925; padding: 16px;
-         display: flex; flex-direction: column; align-items: center; }
-  h1 { font-size: 20px; margin: 4px 0 12px; }
-  #status { font-size: 13px; margin-bottom: 10px; }
-  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%;
-         margin-right: 5px; background: #bbb; }
-  .on  { background: #34a853; } .off { background: #d93025; } .warm { background: #f9ab00; }
-  #bar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; justify-content: center; }
-  #chr { width: 64px; height: 44px; font-size: 26px; text-align: center;
-         border: 1px solid #ccc; border-radius: 10px; background: #fff; }
-  button { height: 44px; padding: 0 16px; font-size: 15px; border: none;
-           border-radius: 10px; background: #e8e4db; color: #2b2925; }
-  button:active { opacity: .7; }
-  #go { background: #2b6cb0; color: #fff; font-weight: 600; }
-  .quick { padding: 0 12px; font-size: 18px; }
-  #wrap { position: relative; }
-  canvas { background: #fff; border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,.08);
-           touch-action: none; display: block; }
-  #result { max-width: 520px; width: 100%; margin-top: 14px; }
-  #score-big { font-size: 40px; font-weight: 700; text-align: center; }
-  #score-sub { text-align: center; font-size: 13px; color: #777; margin-bottom: 8px; }
-  .msg { background: #fff; border-radius: 12px; padding: 10px 14px; margin: 6px 0;
-         font-size: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
-  .msg b { color: #2b6cb0; }
-  #overlay { position: absolute; inset: 0; display: none; align-items: center;
-             justify-content: center; background: rgba(255,255,255,.75);
-             border-radius: 16px; font-size: 16px; font-weight: 600; }
-  #picker { position: fixed; inset: 0; display: none; z-index: 10;
-            background: rgba(0,0,0,.35); align-items: center; justify-content: center; }
-  #picker-box { background: #fff; border-radius: 16px; width: min(92vw, 560px);
-                height: min(78vh, 640px); display: flex; flex-direction: column;
-                padding: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
-  #picker-top { display: flex; gap: 8px; margin-bottom: 8px; }
-  #picker-search { flex: 1; height: 42px; font-size: 17px; padding: 0 12px;
-                   border: 1px solid #ccc; border-radius: 10px; }
-  #picker-grid { flex: 1; overflow-y: auto; display: grid;
-                 grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 4px;
-                 align-content: start; }
-  .pchar { font-size: 24px; height: 46px; display: flex; align-items: center;
-           justify-content: center; border-radius: 8px; background: #f5f3ee; }
-  .pchar:active { background: #d8e6f5; }
-  #picker-info { font-size: 12px; color: #888; margin-top: 6px; text-align: center; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="lingo-api-base-url" content="">
+  <meta name="lingo-edge-endpoint" content="">
+  <meta name="lingo-api-key" content="">
+  <title>링고 — 한자 필기 채점</title>
+  <link rel="stylesheet" href="/web/styles.css">
 </head>
 <body>
-<h1>링고 — 한자 필기 채점</h1>
-<div id="status"><span class="dot" id="dot"></span><span id="stxt">서버 확인 중…</span>
-  <span id="stage-badge" style="margin-left:10px;font-weight:600;color:#2b6cb0"></span></div>
-<div id="bar">
-  <input id="chr" value="永" maxlength="1">
-  <button id="pick">문자 선택</button>
-  <button id="load">가이드</button>
-  <button id="hint" style="display:none">한 획 보기</button>
-  <button id="undo">한 획 지우기</button>
-  <button id="clear">전체 지우기</button>
-  <button id="go">채점하기</button>
-</div>
-<div id="bar">
-  <button class="quick">永</button><button class="quick">水</button>
-  <button class="quick">木</button><button class="quick">日</button>
-  <button class="quick">語</button>
-</div>
-<div id="wrap">
-  <canvas id="cv"></canvas>
-  <div id="overlay">채점 중…</div>
-</div>
-<div id="result"></div>
-<div id="picker">
-  <div id="picker-box">
-    <div id="picker-top">
-      <input id="picker-search" placeholder="문자 붙여넣기·입력하면 바로 선택" maxlength="4">
-      <button id="picker-close">닫기</button>
-    </div>
-    <div id="picker-grid"></div>
-    <div id="picker-info"></div>
+  <h1>링고 — 한자 필기 튜터</h1>
+  <div id="status">
+    <span class="dot" id="dot" aria-hidden="true"></span><span id="stxt">서버 확인 중…</span>
+    <span id="stage-badge"></span>
   </div>
-</div>
-<script>
-var FN = 'https://tnsxhhdmnbhgzqgwosto.supabase.co/functions/v1/score';
-var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRuc3hoaGRtbmJoZ3pxZ3dvc3RvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4MjQwOTQsImV4cCI6MjA5OTQwMDA5NH0.hSWZAEHbbXTutOHxmofzJOC7yZBUhFgLARKSYF_AtxI';
-var cv = document.getElementById('cv');
-var ctx = cv.getContext('2d');
-var SIZE = Math.min(window.innerWidth - 32, 520);
-var DPR = window.devicePixelRatio || 1;
-cv.width = SIZE * DPR; cv.height = SIZE * DPR;
-cv.style.width = SIZE + 'px'; cv.style.height = SIZE + 'px';
-ctx.scale(DPR, DPR);
-ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
-var strokes = [];      // 완성 획 [[x,y]...] (0..1)
-var cur = null;        // 그리는 중인 획
-var template = null;   // 가이드 획
-var lastReport = null;
-var penSeen = false;
-var stage = 1;         // 1: 궤적 따라쓰기, 2: 안 보고 쓰기(힌트로 한 획씩 공개)
-var revealCount = 0;   // 2단계에서 공개된 획 수
+  <div class="bar">
+    <input id="chr" value="永" maxlength="1" aria-label="연습할 문자">
+    <button id="pick" type="button">문자 선택</button>
+    <button id="load" type="button">가이드</button>
+    <button id="hint" type="button" hidden>한 획 보기</button>
+    <button id="undo" type="button">한 획 지우기</button>
+    <button id="clear" type="button">전체 지우기</button>
+    <button id="go" type="button">채점하기</button>
+  </div>
+  <div class="bar" aria-label="빠른 문자 선택">
+    <button class="quick" type="button">永</button>
+    <button class="quick" type="button">水</button>
+    <button class="quick" type="button">木</button>
+    <button class="quick" type="button">日</button>
+    <button class="quick" type="button">語</button>
+  </div>
 
-function setStage(n) {
-  stage = n; revealCount = 0;
-  document.getElementById('stage-badge').textContent =
-    n === 1 ? '1단계: 궤적 따라쓰기' : '2단계: 안 보고 쓰기';
-  document.getElementById('hint').style.display = n === 2 ? '' : 'none';
-}
+  <div id="wrap">
+    <canvas id="cv" aria-label="한자 필기 영역"></canvas>
+    <canvas id="coach-cv" aria-hidden="true"></canvas>
+    <div id="busy-overlay" aria-live="polite">채점 중…</div>
+  </div>
 
-function api(payload, cb, errcb) {
-  fetch(FN, { method: 'POST',
-    headers: { 'Content-Type': 'application/json',
-               'Authorization': 'Bearer ' + KEY, 'apikey': KEY },
-    body: JSON.stringify(payload) })
-  .then(function(r){ return r.json().then(function(b){ cb(r.status, b); }); })
-  .catch(function(e){ if (errcb) errcb(e); });
-}
+  <div id="coach-feedback" data-tone="success" role="status" aria-live="polite">
+    <span id="coach-icon" aria-hidden="true">○</span>
+    <span id="coach-text">가이드를 준비하고 있습니다.</span>
+  </div>
+  <div id="result"></div>
 
-function drawStroke(pts, color, width, dash) {
-  if (pts.length < 2) return;
-  ctx.strokeStyle = color; ctx.lineWidth = width;
-  ctx.setLineDash(dash || []);
-  ctx.beginPath();
-  ctx.moveTo(pts[0][0] * SIZE, pts[0][1] * SIZE);
-  for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] * SIZE, pts[i][1] * SIZE);
-  ctx.stroke(); ctx.setLineDash([]);
-}
+  <div id="picker" role="dialog" aria-modal="true" aria-label="문자 선택">
+    <div id="picker-box">
+      <div id="picker-top">
+        <input id="picker-search" placeholder="문자 붙여넣기·입력하면 바로 선택" maxlength="4">
+        <button id="picker-close" type="button">닫기</button>
+      </div>
+      <div id="picker-grid"></div>
+      <div id="picker-info"></div>
+    </div>
+  </div>
 
-function qColor(q) { return q > 0.7 ? '#34a853' : (q > 0.4 ? '#f9ab00' : '#d93025'); }
-
-function redraw() {
-  ctx.clearRect(0, 0, SIZE, SIZE);
-  // 십자 보조선
-  ctx.strokeStyle = '#eee'; ctx.lineWidth = 1; ctx.setLineDash([6, 6]);
-  ctx.beginPath(); ctx.moveTo(SIZE/2, 0); ctx.lineTo(SIZE/2, SIZE);
-  ctx.moveTo(0, SIZE/2); ctx.lineTo(SIZE, SIZE/2); ctx.stroke(); ctx.setLineDash([]);
-  if (template) {
-    var showN = stage === 1 ? template.length : Math.min(revealCount, template.length);
-    for (var j = 0; j < showN; j++) drawStroke(template[j], '#d8d3c8', 7);
-    for (var j2 = 0; j2 < showN; j2++) {
-      var p = template[j2][0];
-      ctx.fillStyle = '#a89f8f'; ctx.font = '12px sans-serif';
-      ctx.fillText(String(j2 + 1), p[0] * SIZE + 4, p[1] * SIZE - 4);
-    }
-  }
-  if (lastReport && lastReport.user) {
-    for (var k = 0; k < lastReport.user.length; k++) {
-      var e = lastReport.strokes[k];
-      drawStroke(lastReport.user[k], qColor(e ? e.q : 0.5), 5);
-    }
-    if (lastReport.missing && template) {
-      for (var m = 0; m < lastReport.missing.length; m++)
-        drawStroke(template[lastReport.missing[m]], '#2b6cb0', 4, [8, 6]);
-    }
-  } else {
-    for (var s = 0; s < strokes.length; s++) drawStroke(strokes[s], '#2b2925', 5);
-    if (cur) drawStroke(cur, '#2b2925', 5);
-  }
-}
-
-function pos(ev) {
-  var r = cv.getBoundingClientRect();
-  return [(ev.clientX - r.left) / SIZE, (ev.clientY - r.top) / SIZE];
-}
-cv.addEventListener('pointerdown', function(ev) {
-  if (ev.pointerType === 'pen') penSeen = true;
-  if (penSeen && ev.pointerType === 'touch') return; // 손바닥 무시
-  ev.preventDefault();
-  lastReport = null; document.getElementById('result').innerHTML = '';
-  cur = [pos(ev)];
-  cv.setPointerCapture(ev.pointerId);
-});
-cv.addEventListener('pointermove', function(ev) {
-  if (!cur) return;
-  if (penSeen && ev.pointerType === 'touch') return;
-  ev.preventDefault();
-  var evs = ev.getCoalescedEvents ? ev.getCoalescedEvents() : [ev];
-  for (var i = 0; i < evs.length; i++) cur.push(pos(evs[i]));
-  redraw();
-});
-function endStroke(ev) {
-  if (!cur) return;
-  if (cur.length >= 2) strokes.push(cur);
-  cur = null; redraw();
-}
-cv.addEventListener('pointerup', endStroke);
-cv.addEventListener('pointercancel', endStroke);
-
-document.getElementById('undo').onclick = function() {
-  strokes.pop(); lastReport = null;
-  document.getElementById('result').innerHTML = ''; redraw();
-};
-document.getElementById('clear').onclick = function() {
-  strokes = []; lastReport = null;
-  document.getElementById('result').innerHTML = ''; redraw();
-};
-var quicks = document.getElementsByClassName('quick');
-for (var qi = 0; qi < quicks.length; qi++) {
-  quicks[qi].onclick = function(e) {
-    document.getElementById('chr').value = e.target.textContent;
-    loadTemplate();
-  };
-}
-
-function setStatus(cls, txt) {
-  document.getElementById('dot').className = 'dot ' + cls;
-  document.getElementById('stxt').textContent = txt;
-}
-function health() {
-  api({ action: 'health' }, function(st, b) {
-    if (b.ok && b.model_loaded) setStatus('on', 'GPU 서버 온라인 (' + (b.device || '') + ')');
-    else if (b.ok) setStatus('warm', '서버 부팅 중 — 모델 로드까지 잠시 기다리세요');
-    else setStatus('off', '서버 꺼짐 — RunPod에서 pod를 켜세요');
-  }, function() { setStatus('off', '연결 실패'); });
-}
-health(); setInterval(health, 20000);
-
-function loadTemplate() {
-  var ch = document.getElementById('chr').value.trim();
-  if (!ch) return;
-  api({ action: 'template', char: ch }, function(st, b) {
-    if (st === 200) { template = b.strokes; lastReport = null; setStage(1); redraw(); }
-    else alert(b.message || b.detail || '템플릿을 불러올 수 없습니다');
-  });
-}
-document.getElementById('load').onclick = loadTemplate;
-
-document.getElementById('hint').onclick = function() {
-  if (!template) return;
-  if (revealCount < template.length) revealCount++;
-  lastReport = null;
-  document.getElementById('result').innerHTML = '';
-  redraw();
-};
-
-// ---------- 문자 선택 그리드 ----------
-var allChars = '';
-var shown = 0;
-var CHUNK = 400;
-
-function renderChunk() {
-  var grid = document.getElementById('picker-grid');
-  var end = Math.min(shown + CHUNK, allChars.length);
-  var frag = document.createDocumentFragment();
-  for (var i = shown; i < end; i++) {
-    var d = document.createElement('div');
-    d.className = 'pchar'; d.textContent = allChars[i];
-    frag.appendChild(d);
-  }
-  grid.appendChild(frag);
-  shown = end;
-  document.getElementById('picker-info').textContent =
-    shown + ' / ' + allChars.length + '자 (스크롤하면 더 표시)';
-}
-function resetGrid() {
-  document.getElementById('picker-grid').innerHTML = '';
-  shown = 0; renderChunk();
-}
-document.getElementById('pick').onclick = function() {
-  document.getElementById('picker').style.display = 'flex';
-  if (!allChars) {
-    fetch('/chars').then(function(r){ return r.json(); }).then(function(b) {
-      allChars = b.chars; resetGrid();
-    }).catch(function() {
-      document.getElementById('picker-info').textContent = '문자 목록을 불러오지 못했습니다';
-    });
-  }
-};
-document.getElementById('picker-close').onclick = function() {
-  document.getElementById('picker').style.display = 'none';
-};
-document.getElementById('picker').addEventListener('click', function(ev) {
-  if (ev.target === this) this.style.display = 'none';
-});
-document.getElementById('picker-grid').addEventListener('click', function(ev) {
-  if (!ev.target.classList.contains('pchar')) return;
-  document.getElementById('chr').value = ev.target.textContent;
-  document.getElementById('picker').style.display = 'none';
-  strokes = []; lastReport = null;
-  document.getElementById('result').innerHTML = '';
-  loadTemplate();
-});
-document.getElementById('picker-grid').addEventListener('scroll', function() {
-  var g = this;
-  if (shown < allChars.length && g.scrollTop + g.clientHeight > g.scrollHeight - 200)
-    renderChunk();
-});
-document.getElementById('picker-search').addEventListener('input', function() {
-  // 아무 문자나 입력/붙여넣기하면 그 문자 중 템플릿 있는 것을 즉시 선택
-  var v = this.value;
-  for (var i = 0; i < v.length; i++) {
-    if (allChars.indexOf(v[i]) >= 0) {
-      this.value = '';
-      document.getElementById('chr').value = v[i];
-      document.getElementById('picker').style.display = 'none';
-      strokes = []; lastReport = null;
-      document.getElementById('result').innerHTML = '';
-      loadTemplate();
-      return;
-    }
-  }
-});
-
-document.getElementById('go').onclick = function() {
-  var ch = document.getElementById('chr').value.trim();
-  if (!ch) { alert('문자를 입력하세요'); return; }
-  if (strokes.length === 0) { alert('먼저 글자를 써 보세요'); return; }
-  document.getElementById('overlay').style.display = 'flex';
-  api({ action: 'score', char: ch, strokes: strokes }, function(st, b) {
-    document.getElementById('overlay').style.display = 'none';
-    if (st !== 200) {
-      document.getElementById('result').innerHTML =
-        '<div class="msg">' + (b.message || b.detail || '오류: ' + st) + '</div>';
-      return;
-    }
-    lastReport = b;
-    if (!template) template = b.template;
-    redraw();
-    var html = '<div id="score-big">' + b.score + '점</div>' +
-      '<div id="score-sub">모델 점수 ' + b.base_model_score +
-      ' · ' + b.elapsed + '초</div>';
-    var corr = b.corrections || [];
-    for (var i = 0; i < corr.length; i++) {
-      var c = corr[i];
-      var label = c.index >= 0 ? (c.index + 1) + '번 획' : '누락';
-      var gain = (c.gain != null && c.gain > 0) ? ' (+' + c.gain.toFixed(1) + '점 기대)' : '';
-      html += '<div class="msg"><b>' + label + gain + '</b> — ' +
-              c.messages.join(' · ') + '</div>';
-    }
-    if (corr.length === 0)
-      html += '<div class="msg">교정할 획이 없습니다 — 잘 썼습니다!</div>';
-    if (stage === 1) {
-      setStage(2);
-      html += '<div class="msg"><b>2단계</b> — 이번엔 궤적 없이 기억해서 써 보세요. ' +
-              '막히면 <b>한 획 보기</b> 버튼으로 하나씩 확인할 수 있습니다.</div>';
-    }
-    document.getElementById('result').innerHTML = html;
-  }, function() {
-    document.getElementById('overlay').style.display = 'none';
-    document.getElementById('result').innerHTML =
-      '<div class="msg">네트워크 오류 — 다시 시도하세요</div>';
-  });
-};
-setStage(1);
-redraw();
-</script>
+  <script type="module" src="/web/app.js"></script>
 </body>
 </html>

@@ -7,6 +7,7 @@ GET  /health                                                   -> 상태 확인
 """
 import json
 import os
+from pathlib import Path
 import threading
 import time
 
@@ -14,6 +15,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from scorer.chandra_scorer import load_chandra_scorer, analyze_chandra
@@ -24,10 +26,13 @@ KANJI_DIR = os.environ.get('KANJI_DIR', 'kanji')
 CKPT = os.environ.get('CKPT', 'checkpoints/chandra_scorer.pt')
 STROKE_CKPT = os.environ.get('STROKE_CKPT', 'checkpoints/stroke_scorer.pt')
 HYBRID_CONFIG = os.environ.get('HYBRID_CONFIG', 'checkpoints/hybrid_config.json')
+ROOT_DIR = Path(__file__).resolve().parents[1]
+WEB_DIR = ROOT_DIR / 'web'
 
 app = FastAPI(title='lingo-kanji-scorer')
 app.add_middleware(CORSMiddleware, allow_origins=['*'],
                    allow_methods=['*'], allow_headers=['*'])
+app.mount('/web', StaticFiles(directory=WEB_DIR), name='web')
 
 _model = None
 _loaded_at = None
@@ -93,7 +98,7 @@ def _sanitize(report):
 @app.get('/')
 def index():
     from fastapi.responses import HTMLResponse
-    return HTMLResponse(open('web/index.html', encoding='utf-8').read())
+    return HTMLResponse((WEB_DIR / 'index.html').read_text(encoding='utf-8'))
 
 
 _chars_cache = None

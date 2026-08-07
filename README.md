@@ -25,3 +25,27 @@
 ## 로컬에서 서버 켜고 끄기
 
 `run_lingo.bat` 더블클릭 (자세한 내용은 [docs/SERVE.md](docs/SERVE.md) 참고).
+
+## 개발·검증
+
+```bash
+python -m pip install -r requirements-dev.txt
+python scripts/generate_realtime_fixtures.py
+python -m pytest -q
+node --test web/tests/*.test.mjs
+node web/benchmark-local.mjs
+```
+
+로컬 서버는 저장소 루트에서 다음처럼 실행한다.
+
+```bash
+python -m uvicorn scorer.server:app --host 127.0.0.1 --port 8000
+```
+
+웹앱은 기본적으로 동일 출처의 `/health`, `/template/{char}`, `/score`를 사용한다.
+다른 배포를 연결할 때는 HTML의 빈 `lingo-api-*` meta 값 또는 모듈 로드 전에
+`window.LINGO_CONFIG = { apiBaseUrl, edgeEndpoint, apiKey }`를 런타임에서 주입한다.
+배포 URL과 키는 소스에 새로 하드코딩하지 않는다.
+
+실시간 로컬 코치의 기준선과 검증 결과는
+[docs/REALTIME_TUTOR_BASELINE.md](docs/REALTIME_TUTOR_BASELINE.md)에 기록한다.
