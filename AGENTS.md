@@ -4,22 +4,25 @@
 
 ## 현재 최우선 목표
 
-완료 후 한 번에 점수를 보여 주는 현재 흐름을, 사용자가 획을 쓰는 동안과 펜을 뗀 직후 단계적으로 개입하는 **실시간 선생님형 필기 튜터**로 개선한다.
+완료 후 한 번에 점수를 보여 주는 현재 흐름을, 사용자가 획을 쓰는 동안과 펜을 뗀 직후 단계적으로 개입하는 **실시간 선생님형 필기 튜터**로 개선한다. 동시에 Chandra 비전 모델과 좌표 기반 스트로크 모델이 `い`와 `り`처럼 미세한 획 차이로 구분되는 문자를 잘못 인정하는 문제를 별도 품질 트랙으로 해결한다.
 
-구현 기준 문서는 다음 두 개다.
+구현 기준 문서는 다음 세 개다.
 
 1. 전체 아키텍처와 Phase 0~5 계약: [`docs/REALTIME_TUTOR_IMPLEMENTATION.md`](docs/REALTIME_TUTOR_IMPLEMENTATION.md)
 2. 현재 다음 작업과 실제 배포 검증 계약: [`docs/NEXT_PHASE_RUNPOD_VALIDATION.md`](docs/NEXT_PHASE_RUNPOD_VALIDATION.md)
+3. 유사 문자 판별, 두 모델 개선, 구조화 LLM 피드백 계약: [`docs/CONFUSABLE_CHARACTER_MODEL_LLM_PLAN.md`](docs/CONFUSABLE_CHARACTER_MODEL_LLM_PLAN.md)
 
-작업을 시작하기 전에 두 문서를 모두 읽는다. 현재 기본 작업 순서는 다음과 같다.
+작업을 시작하기 전에 관련 문서를 모두 읽는다. 현재 기본 작업 순서는 다음과 같다.
 
 1. 현재 구현이 Phase 0과 Phase 1 완료 조건을 충족하는지 근거 기반으로 감사한다.
 2. 미완료 항목이 있으면 해당 항목만 보완한다.
 3. Phase 2 경량 서버 코치를 구현한다.
 4. 실제 RunPod GPU Pod에서 direct API, Supabase Edge Function, 브라우저 E2E를 수행한다.
 5. 정확한 SHA와 실제 p50/p95, 실패 사항, Pod Stop 증거를 보고한다.
+6. Phase 2 RunPod gate가 통과되면 별도 branch/PR에서 `C0 — confusion baseline`을 시작한다.
+7. `い↔り`와 자동 mining된 유사 문자 쌍의 baseline을 고정한 뒤에만 hard-negative 학습, 모델 v2, fusion, LLM 계층으로 진행한다.
 
-Phase 3 이상은 Phase 2와 실제 RunPod 검증이 통과된 뒤 별도 PR로 진행한다.
+Phase 3 적응형 정책, 모델 품질 C1 이상, LLM 구현은 각각 독립적으로 검토 가능한 작업 단위로 분리한다. Phase 2 기능 구현과 대규모 모델 재학습을 한 PR에 섞지 않는다.
 
 ## 현재 코드에서 먼저 읽을 파일
 
@@ -27,12 +30,14 @@ Phase 3 이상은 Phase 2와 실제 RunPod 검증이 통과된 뒤 별도 PR로 
 2. `web/edge-score.ts` — Supabase Edge Function과 RunPod 프록시
 3. `web/edge-app.ts` — 항상 켜진 앱 배포 후보와 중복 HTML 여부
 4. `scorer/server.py` — FastAPI 엔드포인트와 모델 로딩
-5. `scorer/chandra_scorer.py` — Chandra 기반 심층 채점과 반사실 분석
-6. `scorer/hybrid.py` — Chandra + 경량 좌표 모델 결합
-7. `scorer/feedback.py` — 획 매칭, 기하 피드백, 그래디언트 경로
-8. `scorer/model.py`, `scorer/data.py`, `scorer/synth.py` — 경량 좌표 Scorer와 학습 데이터 계약
-9. `serve.sh`, `runpod-session.ps1`, `README-SERVE.md` — 실제 RunPod 기동과 운영 경로
-10. `docs/TODO.md` — 기타 제품 개선 항목
+5. `scorer/chandra_scorer.py`, `scorer/train_chandra.py`, `scorer/render.py` — Chandra 모델, 학습, 시간 인코딩
+6. `scorer/model.py`, `scorer/data.py`, `scorer/synth.py` — 좌표 Scorer, 12점 표현, same-character 합성 데이터
+7. `scorer/train_recognizer.py`, `scorer/train_scorer.py` — 좌표 모델 사전학습과 채점 학습
+8. `scorer/hybrid.py`, `scorer/calibrate_hybrid.py` — 두 모델의 현재 정적 결합
+9. `scorer/feedback.py` — 획 매칭, 기하 피드백, 그래디언트 경로
+10. `kanji/03044.svg`, `kanji/0308a.svg` — `い`, `り` mandatory fixture 원본
+11. `serve.sh`, `runpod-session.ps1`, `README-SERVE.md` — 실제 RunPod 기동과 운영 경로
+12. `docs/TODO.md` — 현재 우선순위
 
 ## 제품 불변조건
 
@@ -47,26 +52,35 @@ Phase 3 이상은 Phase 2와 실제 RunPod 검증이 통과된 뒤 별도 PR로 
 - Pod가 Stop된 상태에서 새로 앱을 열어도 최소 핵심 문자 연습이 가능해야 한다.
 - 색만으로 오류를 전달하지 않는다.
 - 자연어보다 오류 코드, 신뢰도, 좌표, 벡터, 다음 행동을 먼저 설계한다.
+- `어느 문자인가(identity)`와 `그 글자를 얼마나 잘 썼는가(quality)`를 분리한다.
+- 다른 글자를 반듯하게 쓴 경우를 목표 글자의 높은 점수로 처리하지 않는다.
+- 목표와 유사 후보의 margin이 작으면 억지로 확정하지 않고 ambiguity를 허용한다.
+- LLM은 모델이 잠근 문자 판정, 점수, 오류 코드, critical stroke, 다음 행동을 변경하지 않는다.
+- LLM 장애·timeout·검증 실패가 필기와 채점 흐름을 막지 않는다.
 
 ## 호환성 규칙
 
 - 기존 `POST /score` 요청·응답 계약을 깨지 않는다.
+- 새 confusion 결과는 optional 필드로 추가한다.
 - 기존 `[x, y]` 포인트 배열을 계속 지원한다.
 - rich point `{x, y, t, pressure, ...}`를 추가할 때는 이전 형식과 양방향 호환되게 한다.
 - 기존 1단계 따라쓰기와 2단계 암기쓰기 기능을 삭제하지 않는다.
 - 기존 점수 척도를 근거 없이 변경하지 않는다.
-- 체크포인트와 KanjiVG 데이터 형식을 마이그레이션하지 않는다.
+- 체크포인트와 KanjiVG 데이터 형식을 조용히 재해석하지 않는다. 새 checkpoint에는 명시적 schema/model version을 둔다.
 - 오래된 PR #1은 통째로 merge/cherry-pick하지 않는다. DTW 아이디어만 테스트와 함께 다시 구현한다.
 
 ## 아키텍처 규칙
 
-세 경로를 분리한다.
+피드백 경로를 분리한다.
 
 1. **로컬 코치**: `pointermove`와 즉시 `pointerup` 피드백. 순수 기하 계산, 네트워크 없음.
-2. **경량 코치**: `POST /coach/stroke`. 기존 좌표 `Scorer`를 최대 1회 호출하고, 모델이 없으면 geometry-only 폴백.
+2. **경량 코치**: `POST /coach/stroke`. 좌표 `Scorer`를 최대 1회 호출하고, 모델이 없으면 geometry-only 폴백.
 3. **심층 최종채점**: 기존 `POST /score`. Chandra/Hybrid와 반사실 분석. UI 비차단.
+4. **교사 언어화**: `POST /coach/verbalize` 또는 동등 경로. 구조화 evidence만 받아 문장을 만들며 hot path가 아님.
 
 실시간 획 매칭은 완성 글자용 전역 Hungarian 결과에 의존하지 않는다. 인정된 획 prefix를 유지하는 인과적·단조 매칭을 사용한다.
+
+유사 문자 판별은 목표 템플릿 하나만 독립 채점하는 방식에 머물지 않는다. confusion graph의 top-K 후보와 목표 문자를 경쟁시키고 target-vs-competitor margin을 계산한다.
 
 프런트엔드는 우선 네이티브 ES module로 분리한다. 실시간 튜터 작업만을 이유로 React/Vue 등의 전면 재작성을 하지 않는다.
 
@@ -109,6 +123,31 @@ Phase 3 이상은 Phase 2와 실제 RunPod 검증이 통과된 뒤 별도 PR로 
 
 상세 절차와 합격 조건은 `docs/NEXT_PHASE_RUNPOD_VALIDATION.md`를 따른다.
 
+### Gate D — 유사 문자 baseline
+
+Phase 2 RunPod gate가 통과된 뒤 별도 branch에서 수행한다.
+
+- `い↔り` deterministic fixture를 만든다.
+- 현재 stroke, Chandra, hybrid checkpoint의 양방향 false acceptance를 측정한다.
+- target true acceptance, competitor false acceptance, pairwise margin, calibration을 기록한다.
+- 작은 versioned confusion registry와 자동 neighbor mining baseline을 추가한다.
+- 정확한 checkpoint와 RunPod 환경으로 `docs/validation/CONFUSION_BASELINE_<YYYYMMDD>.md`를 만든다.
+- baseline이 고정되기 전에는 model v2 또는 LLM을 구현하지 않는다.
+
+### C1 이상 — 모델·LLM 품질 트랙
+
+`docs/CONFUSABLE_CHARACTER_MODEL_LLM_PLAN.md`의 순서를 따른다.
+
+1. hard-negative data foundation
+2. stroke model v2
+3. Chandra model v2
+4. calibrated hybrid와 ambiguity
+5. structured evidence와 deterministic fallback
+6. LLM pedagogical renderer
+7. 동의 기반 실제 사용자 A/B
+
+각 단계는 독립 ablation과 실제 RunPod 검증을 가진다.
+
 ## RunPod 실기 검증 규칙
 
 RunPod 실제 검증은 필수다.
@@ -117,11 +156,39 @@ RunPod 실제 검증은 필수다.
 - RunPod 접근 권한이 없으면 완료가 아니라 `미완료`로 보고한다.
 - Pod 내부 수정 작업 트리로 테스트하지 않는다. 정확한 push SHA를 사용한다.
 - `/health.build_sha`가 대상 SHA와 다르면 검증을 중단한다.
+- 모델 학습 보고서에는 dataset/config/registry/checkpoint hash를 기록한다.
 - API key, service role key, SSH key, 전체 env 덤프를 기록하지 않는다.
 - 사용자 지시 없이 Pod를 `Terminate`하지 않는다.
 - 성공·실패와 관계없이 끝에 Pod를 `Stop`한다.
 - 실제로 실행하지 않은 테스트를 성공했다고 쓰지 않는다.
-- 실제 측정하지 않은 latency를 추정하지 않는다.
+- 실제 측정하지 않은 latency와 성능을 추정하지 않는다.
+
+## 모델 품질 연구 규칙
+
+- 단순 에폭 증가나 모델 크기 증가만으로 유사 문자 문제가 해결됐다고 주장하지 않는다.
+- same-character 합성 데이터만으로 confusion 개선을 주장하지 않는다.
+- `written_char`, `target_char`, `is_target`, `competitor`, `pair_id`, ambiguity를 명시한다.
+- hard negative는 full competitor, critical-stroke transplant, model-mined negative를 구분한다.
+- 합성 interpolation의 경계 샘플을 근거 없이 강한 class label로 사용하지 않는다.
+- train/validation/test의 generator seed family를 분리한다.
+- 실제 이미지 데이터는 writer split을 우선한다.
+- 평균값뿐 아니라 pair별, 방향별, worst-10 결과를 보고한다.
+- 새로운 loss는 개별 ablation 후 결합한다. SupCon, angular margin, Soft-DTW를 한 번에 추가하지 않는다.
+- 두 모델의 distillation은 confidence-gated ablation으로만 평가하며 낮은 confidence 오류를 복제하지 않는다.
+- attention map을 사실 근거로 단독 사용하지 않는다.
+- 정상 글자의 true acceptance가 크게 하락하면 confusion 개선으로 인정하지 않는다.
+
+## LLM 피드백 규칙
+
+- LLM 입력은 versioned structured evidence여야 한다.
+- 원시 좌표·필기 이미지·사용자 식별 정보를 기본 전송하지 않는다.
+- strict JSON Schema와 semantic validator를 모두 사용한다.
+- `decision_id`, target, competitor, error code, critical stroke, next action은 locked field다.
+- schema를 지킨 문장도 evidence와 모순되면 폐기한다.
+- 모든 code에 deterministic fallback 문구가 있어야 한다.
+- 첫 번째 단순 오류, pointermove, 즉시 pointerup에는 LLM을 호출하지 않는다.
+- 반복 오류, `왜?`, hint escalation, 문자/세션 요약에서만 비동기 호출한다.
+- LLM 문장이 자연스럽다는 이유만으로 merge하지 않는다. faithfulness, latency, cost, 학습 효과를 평가한다.
 
 ## 코딩 규칙
 
@@ -131,8 +198,8 @@ RunPod 실제 검증은 필수다.
 - 임계값은 이름 있는 상수 또는 설정 객체로 둔다. 코드 곳곳에 magic number를 흩뿌리지 않는다.
 - 오류 문구를 상태 판정의 키로 쓰지 않는다. 안정적인 오류 코드를 사용한다.
 - 예외를 삼키지 않는다. 사용자에게는 안전한 메시지를, 개발 로그에는 원인을 남긴다.
-- 성능 개선을 주장할 때는 실제 p50/p95 측정값과 측정 환경을 기록한다.
-- 대형 체크포인트, 모델 캐시, 원시 사용자 로그, 생성된 이미지, 훈련 로그를 Git에 추가하지 않는다.
+- 성능 개선을 주장할 때는 실제 p50/p95와 품질 지표, 측정 환경을 기록한다.
+- 대형 체크포인트, 모델 캐시, 원시 사용자 로그, 외부 데이터, 생성 이미지, 전체 prediction dump, 훈련 로그를 Git에 추가하지 않는다.
 - 새 의존성은 필요한 최소 범위로 제한하고 이유를 문서화한다.
 - 비밀키, service role key, 개인 URL, 임시 RunPod 주소를 새 소스에 커밋하지 않는다.
 - 운영 URL은 환경설정에서 주입하며, 검증 보고서에는 필요 시 비밀이 아닌 host 메타데이터만 남긴다.
@@ -141,7 +208,7 @@ RunPod 실제 검증은 필수다.
 
 변경에 맞는 테스트가 없으면 기능이 완료된 것이 아니다.
 
-최소 검증 항목:
+최소 실시간 기능 검증:
 
 - 완벽한 획, 시작/종점 이동, 경로 이탈, 방향 반전, 너무 짧거나 긴 획
 - 잘못된 순서, 추가/누락 획, 0길이/중복점, NaN/Infinity
@@ -154,6 +221,27 @@ RunPod 실제 검증은 필수다.
 - direct RunPod 및 Edge Function 원격 계약
 - Pod Stop 뒤 fresh-load local-only 동작
 
+최소 confusion 품질 검증:
+
+- `い` target에 `り` clean/왜곡/full-substitution 제출
+- `り` target에 `い` clean/왜곡/full-substitution 제출
+- 2획 critical-stroke transplant와 morph ladder
+- target true acceptance와 competitor false acceptance
+- 양방향 margin과 ambiguity
+- critical stroke/evidence code
+- normal-character regression
+- checkpoint/registry/schema version compatibility
+
+최소 LLM 검증:
+
+- locked field 불변
+- target/competitor 뒤바꿈 방지
+- invented score/evidence 방지
+- 한 번에 한 행동
+- schema/semantic failure fallback
+- timeout/5xx fallback
+- stale response 폐기
+
 권장 명령은 구현하면서 저장소에 실제로 동작하도록 추가한다.
 
 ```bash
@@ -162,6 +250,8 @@ node --test web/tests/*.test.mjs
 python -m scorer.benchmark_realtime --engine geometry-only
 python -m scorer.benchmark_realtime --engine geometry+stroke-model
 python scripts/validate_runpod.py --help
+python -m scorer.evaluate_confusions --help
+python scripts/validate_teacher_feedback.py --help
 ```
 
 명령이 아직 존재하지 않으면 해당 Phase에서 만들고 문서화한다. 실행하지 않은 테스트를 통과했다고 보고하지 않는다.
@@ -174,28 +264,32 @@ python scripts/validate_runpod.py --help
 - 생성물이나 포맷 변경만으로 대규모 diff를 만들지 않는다.
 - 구현 커밋과 실제 RunPod 검증 보고서 커밋을 분리한다.
 - 원격 검증 전에 대상 커밋을 push한다.
+- Phase 2, confusion C0, 모델 C1~C4, LLM C5~C6은 별도 branch/PR을 원칙으로 한다.
 - 작업 종료 전에 `git diff`, 테스트 결과, 새 파일 크기, 비밀정보 포함 여부를 확인한다.
-- Phase 3은 Phase 2와 RunPod Gate가 통과된 뒤 별도 PR로 진행한다.
 
 ## 결과 보고 형식
 
-Codex의 최종 보고에는 다음을 반드시 포함한다.
+Codex의 최종 보고에는 작업 범위에 해당하는 다음을 반드시 포함한다.
 
 1. Phase 0/1 감사 결과
-2. 구현한 Phase와 구현하지 않은 Phase
+2. 구현한 Phase/C-stage와 구현하지 않은 단계
 3. branch, 정확한 HEAD, main merge-base
 4. 변경 파일과 책임
 5. 실행한 로컬 명령 및 실제 결과
 6. 실제 RunPod Pod와 GPU 환경
 7. 배포된 `build_sha` 일치 여부
-8. direct/Edge 요청 수, status, timeout 수
-9. 실제 측정한 direct/Edge coach p50/p95/max
-10. `/score` 실제 p50/p95와 UI 비차단 결과
-11. geometry-only 실제 폴백 결과
-12. 서버 offline fresh-load 결과
-13. iPad/Apple Pencil 검증 여부
-14. Pod Stop 확인
-15. 검증하지 못한 기기·환경
-16. 남은 위험과 다음 단일 작업 단위
+8. dataset/config/confusion-registry/checkpoint hash
+9. direct/Edge 요청 수, status, timeout 수
+10. 실제 측정한 p50/p95/max와 peak VRAM
+11. `/score` 호환성과 normal-character 회귀 결과
+12. `い→り`, `り→い` false acceptance와 margin
+13. confusion macro/worst-pair 결과
+14. geometry-only 실제 폴백 결과
+15. LLM locked-field/semantic/fallback 결과
+16. 서버 offline fresh-load 결과
+17. iPad/Apple Pencil 검증 여부
+18. Pod Stop 확인
+19. 검증하지 못한 데이터·기기·환경
+20. 남은 위험과 다음 단일 작업 단위
 
 RunPod를 실제로 시작하지 않았거나 접속하지 못했다면 첫 문단에서 명시하고 완료를 주장하지 않는다.
