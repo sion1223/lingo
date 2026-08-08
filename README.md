@@ -40,6 +40,27 @@ python scripts/validate_runpod.py --help
 python scripts/validate_teacher_feedback.py --cases 1000
 ```
 
+유사 문자 C0 도구는 사람 검토가 없는 morph 샘플을 강한 문자 라벨로 만들지 않고
+`ambiguous`로 분리한다. 로컬 CPU에서는 geometry와 경량 stroke checkpoint까지만 측정하며,
+Chandra/hybrid 최종 근거는 실제 CUDA RunPod에서 같은 SHA로 다시 측정한다.
+
+```bash
+python -m scorer.build_confusion_graph \
+  --scope kana --top-k 10 \
+  --output artifacts/confusion_graph_kana_seed_v1.json
+python -m scorer.evaluate_confusions \
+  --backends template_geometry,stroke \
+  --output artifacts/confusion_baseline_local.json
+
+# 새 RunPod에서 exact pushed SHA와 checkpoint를 확인한 뒤 실행
+python -m scorer.evaluate_confusions \
+  --backends stroke,chandra,hybrid --strict-backends \
+  --output artifacts/confusion_baseline_runpod.json
+```
+
+현재 로컬 기준선과 미실행 gate는
+[docs/validation/CONFUSION_BASELINE_20260809.md](docs/validation/CONFUSION_BASELINE_20260809.md)에 기록한다.
+
 로컬 서버는 저장소 루트에서 다음처럼 실행한다.
 
 ```bash

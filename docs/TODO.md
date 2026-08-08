@@ -46,14 +46,18 @@ RunPod 접근 권한이 없거나 실제 Pod를 시작하지 못한 경우 Phase
 
 ### C0 — 먼저 해야 할 baseline
 
-- [ ] `configs/confusions/` schema와 `kana_seed_v1.yaml` 생성
-- [ ] `い↔り`를 mandatory pair로 등록
-- [ ] `kanji/03044.svg`, `kanji/0308a.svg` 기반 deterministic fixture 생성
-- [ ] 현재 stroke/Chandra/hybrid checkpoint의 `い→り`, `り→い` 양방향 false acceptance 측정
-- [ ] target true acceptance, pairwise margin, candidate accuracy, calibration 측정
-- [ ] 자동 template-neighbor mining prototype 추가
+- [x] `configs/confusions/` schema와 `kana_seed_v1.yaml` 생성
+- [x] `い↔り`를 mandatory pair로 등록
+- [x] `kanji/03044.svg`, `kanji/0308a.svg` 기반 deterministic fixture 생성
+- [x] 현재 stroke checkpoint의 `い→り`, `り→い` 로컬 양방향 false acceptance 측정
+- [ ] 현재 Chandra/hybrid checkpoint의 실제 CUDA 양방향 false acceptance 측정
+- [x] target true acceptance, pairwise margin, candidate accuracy, calibration proxy 측정
+- [x] 자동 template-neighbor mining prototype 추가
 - [ ] 실제 RunPod에서 exact SHA/checkpoint로 baseline 재현
-- [ ] `docs/validation/CONFUSION_BASELINE_<YYYYMMDD>.md` 작성
+- [x] `docs/validation/CONFUSION_BASELINE_<YYYYMMDD>.md` 작성
+
+로컬 결과와 미실행 gate: [`validation/CONFUSION_BASELINE_20260809.md`](validation/CONFUSION_BASELINE_20260809.md).
+C0 전체는 Chandra/hybrid RunPod 재현 전까지 완료가 아니다.
 
 baseline이 고정되기 전에는 model v2나 LLM 구현을 시작하지 않는다.
 
