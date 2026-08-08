@@ -10,6 +10,14 @@ import {
   isMatchingCoachResponse,
   normalizeCoachResponse,
 } from "./coach/server-refinement.js";
+import {
+  isCurrentTeacherContext,
+  localTeacherFallback,
+  normalizeTeacherEnvelope,
+  tryBuildTeacherFeedbackRequest,
+} from "./coach/teacher-feedback.js";
+
+const TEACHER_REQUEST_TIMEOUT_MS = 28_000;
 
 const api = new ApiClient();
 const elements = {
@@ -21,6 +29,13 @@ const elements = {
   coachFeedback: document.getElementById("coach-feedback"),
   coachIcon: document.getElementById("coach-icon"),
   coachText: document.getElementById("coach-text"),
+  teacherActions: document.getElementById("teacher-actions"),
+  teacherExplain: document.getElementById("teacher-explain"),
+  teacherRequestStatus: document.getElementById("teacher-request-status"),
+  teacherFeedback: document.getElementById("teacher-feedback"),
+  teacherSource: document.getElementById("teacher-source"),
+  teacherPrimary: document.getElementById("teacher-primary"),
+  teacherSecondary: document.getElementById("teacher-secondary"),
   statusDot: document.getElementById("dot"),
   statusText: document.getElementById("stxt"),
   stageBadge: document.getElementById("stage-badge"),
@@ -54,6 +69,10 @@ let framePending = false;
 let lastPartialAnalysisAt = Number.NEGATIVE_INFINITY;
 let allCharacters = "";
 let shownCharacters = 0;
+let teacherNetworkAvailable = false;
+let currentTeacherContext = null;
+let repeatedErrorCode = null;
+let repeatedErrorCount = 0;
 const characterChunkSize = 400;
 
 function identity(prefix) {
@@ -82,6 +101,92 @@ function setCoachMessage(text, tone = "success", icon = "○") {
   elements.coachFeedback.dataset.tone = tone;
   elements.coachIcon.textContent = icon;
   elements.coachText.textContent = text;
+}
+
+function hideTeacherAnswer() {
+  elements.teacherFeedback.hidden = true;
+  elements.teacherSource.textContent = "선생님 설명";
+  elements.teacherPrimary.textContent = "";
+  elements.teacherSecondary.textContent = "";
+  elements.teacherSecondary.hidden = true;
+}
+
+function clearTeacherState({ clearContext = true, resetHistory = false } = {}) {
+  coach.lifecycle.abortKind("verbalize");
+  if (clearContext) currentTeacherContext = null;
+  if (resetHistory) {
+    repeatedErrorCode = null;
+    repeatedErrorCount = 0;
+  }
+  elements.teacherActions.hidden = !currentTeacherContext;
+  elements.teacherExplain.disabled = false;
+  elements.teacherRequestStatus.textContent = "";
+  hideTeacherAnswer();
+}
+
+function teacherSourceLabel(source) {
+  if (source === "luna") return "GPT-5.6 Luna 선생님";
+  if (source === "cache") return "검증된 AI 선생님 설명";
+  return "기본 선생님 설명";
+}
+
+function renderTeacherAnswer(envelope) {
+  const secondary = envelope.feedback.secondary_text || "";
+  elements.teacherSource.textContent = teacherSourceLabel(envelope.source);
+  elements.teacherPrimary.textContent = envelope.feedback.primary_text;
+  elements.teacherSecondary.textContent = secondary;
+  elements.teacherSecondary.hidden = !secondary;
+  elements.teacherFeedback.hidden = false;
+}
+
+function diagnosisWithServerEvidence(body, diagnosis) {
+  const structured = body?.teacher_evidence ?? body?.evidence ?? {};
+  const confusion = body?.confusion ?? {};
+  return {
+    ...diagnosis,
+    nearestCompetitor: body?.nearest_competitor ?? confusion.nearest_competitor ?? null,
+    criticalStroke: body?.critical_stroke ?? confusion.critical_stroke ?? null,
+    targetMargin: body?.target_margin ?? confusion.margin ?? null,
+    evidenceCodes: body?.evidence_codes ?? confusion.evidence_codes ?? null,
+    targetFeatureProfile: structured.target_feature_profile ?? null,
+    observedFeatureProfile: structured.observed_feature_profile ?? null,
+  };
+}
+
+function prepareTeacherExplanation(diagnosis, { countAttempt = true } = {}) {
+  clearTeacherState({ clearContext: true });
+  const errorCode = diagnosis?.primaryCue?.code;
+  if (!errorCode) return;
+
+  if (countAttempt) {
+    repeatedErrorCount = errorCode === repeatedErrorCode
+      ? repeatedErrorCount + 1
+      : 1;
+    repeatedErrorCode = errorCode;
+  } else if (errorCode !== repeatedErrorCode) {
+    repeatedErrorCode = errorCode;
+    repeatedErrorCount = 1;
+  }
+
+  const request = tryBuildTeacherFeedbackRequest({
+    decisionId: identity("decision"),
+    diagnosis,
+    targetChar: elements.character.value.trim(),
+    nearestCompetitor: diagnosis.nearestCompetitor,
+    mode: stage === 1 ? "trace" : "recall",
+    totalStrokes: template?.length ?? 1,
+    attemptNumber: Math.max(1, strokes.length),
+    sameErrorCount: repeatedErrorCount,
+  });
+  if (!request) return;
+  currentTeacherContext = {
+    request,
+    fallbackText: diagnosis.primaryCue.text,
+    allowNetwork: errorCode !== "UNCERTAIN_MATCH",
+  };
+  elements.teacherActions.hidden = false;
+  elements.teacherExplain.disabled = false;
+  elements.teacherRequestStatus.textContent = "";
 }
 
 function setStage(nextStage) {
@@ -236,6 +341,7 @@ function renderDiagnosis(diagnosis) {
 
 function resetVisibleAttempt(message = "첫 획부터 천천히 써 보세요.") {
   coach.reset(template);
+  clearTeacherState({ clearContext: true, resetHistory: true });
   attemptId = identity("attempt");
   strokes = [];
   currentStroke = null;
@@ -327,6 +433,7 @@ async function loadTemplate({ forceNetwork = true } = {}) {
 async function checkHealth() {
   try {
     const { body } = await api.request("health");
+    teacherNetworkAvailable = Boolean(body.ok || body.coach_ready || body.deep_score_ready);
     if (body.deep_score_ready || (body.ok && body.model_loaded)) {
       setStatus("on", `최종 채점 서버 온라인 (${body.device || "ready"})`);
     } else if (body.coach_ready || body.ok) {
@@ -335,6 +442,7 @@ async function checkHealth() {
       setStatus("off", "최종 채점 서버 오프라인 · 로컬 코치는 사용 가능");
     }
   } catch {
+    teacherNetworkAvailable = false;
     setStatus("off", "최종 채점 서버 오프라인 · 로컬 코치는 사용 가능");
   }
 }
@@ -374,13 +482,14 @@ async function requestServerRefinement({
     ) {
       return;
     }
-    const serverDiagnosis = normalizeCoachResponse(body);
+    const serverDiagnosis = diagnosisWithServerEvidence(body, normalizeCoachResponse(body));
     const selected = chooseHigherConfidence(localDiagnosis, serverDiagnosis);
     if (
       selected === serverDiagnosis
       && coach.applyServerRefinement(token, localDiagnosis, serverDiagnosis)
     ) {
       renderDiagnosis(serverDiagnosis);
+      prepareTeacherExplanation(serverDiagnosis, { countAttempt: false });
     }
   } catch (error) {
     if (error.name !== "AbortError") {
@@ -397,6 +506,7 @@ elements.canvas.addEventListener("pointerdown", (event) => {
   if (penSeen && event.pointerType === "touch") return;
   if (!coach.beginStroke()) return;
   coach.lifecycle.abortKind("coach");
+  clearTeacherState({ clearContext: true });
   if (coach.lifecycle.abortKind("score")) {
     elements.busyOverlay.style.display = "none";
   }
@@ -437,6 +547,7 @@ function endStroke(event) {
   const diagnosis = coach.finishStroke(completed);
   redrawInk();
   renderDiagnosis(diagnosis);
+  prepareTeacherExplanation(diagnosis);
   if (diagnosis) {
     void requestServerRefinement({
       localDiagnosis: diagnosis,
@@ -454,6 +565,7 @@ document.getElementById("undo").addEventListener("click", () => {
   if (!strokes.length) return;
   strokes.pop();
   coach.undoLast();
+  clearTeacherState({ clearContext: true, resetHistory: true });
   lastReport = null;
   elements.result.replaceChildren();
   elements.busyOverlay.style.display = "none";
@@ -480,6 +592,80 @@ elements.hint.addEventListener("click", () => {
   lastReport = null;
   elements.result.replaceChildren();
   redrawInk();
+});
+
+function teacherDecisionStillSelected(token, decisionId) {
+  return Boolean(
+    token?.attemptRevision === coach.lifecycle.revision
+    && currentTeacherContext?.request?.locked_decision?.decision_id === decisionId
+  );
+}
+
+elements.teacherExplain.addEventListener("click", async () => {
+  const context = currentTeacherContext;
+  if (!context) return;
+  const { request } = context;
+  const decisionId = request.locked_decision.decision_id;
+  const fallback = () => localTeacherFallback(request, context.fallbackText);
+
+  if (!teacherNetworkAvailable || !context.allowNetwork) {
+    renderTeacherAnswer(fallback());
+    elements.teacherRequestStatus.textContent = context.allowNetwork
+      ? "오프라인 · 기본 설명"
+      : "낮은 확신 · 기본 설명";
+    return;
+  }
+
+  coach.lifecycle.abortKind("verbalize");
+  const token = coach.lifecycle.createRequest("verbalize");
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    token.controller.abort();
+  }, TEACHER_REQUEST_TIMEOUT_MS);
+  elements.teacherExplain.disabled = true;
+  renderTeacherAnswer(fallback());
+  elements.teacherRequestStatus.textContent = "기본 설명 표시 중 · AI 설명 준비 중…";
+
+  try {
+    const { status, body } = await api.request(
+      "verbalize",
+      request,
+      { signal: token.controller.signal },
+    );
+    if (!isCurrentTeacherContext(coach.lifecycle, token, decisionId, currentTeacherContext)) {
+      return;
+    }
+    const envelope = status === 200
+      ? normalizeTeacherEnvelope(body, request)
+      : fallback();
+    renderTeacherAnswer(envelope);
+    elements.teacherRequestStatus.textContent = envelope.source === "fallback"
+      ? "기본 설명"
+      : "검증 완료";
+  } catch (error) {
+    const ownsContext = timedOut
+      ? teacherDecisionStillSelected(token, decisionId)
+      : isCurrentTeacherContext(coach.lifecycle, token, decisionId, currentTeacherContext);
+    if (ownsContext) {
+      renderTeacherAnswer(fallback());
+      elements.teacherRequestStatus.textContent = timedOut
+        ? "시간 초과 · 기본 설명"
+        : error instanceof TypeError
+          ? "검증 실패 · 기본 설명"
+          : "연결 실패 · 기본 설명";
+    }
+    if (error.name !== "AbortError") {
+      console.warn("teacher feedback unavailable", error);
+    }
+  } finally {
+    clearTimeout(timeout);
+    const stillSelected = timedOut
+      ? teacherDecisionStillSelected(token, decisionId)
+      : isCurrentTeacherContext(coach.lifecycle, token, decisionId, currentTeacherContext);
+    coach.lifecycle.finish(token);
+    if (stillSelected) elements.teacherExplain.disabled = false;
+  }
 });
 
 function renderCharacterChunk() {
@@ -592,6 +778,7 @@ document.getElementById("go").addEventListener("click", async () => {
 
   coach.lifecycle.abortKind("coach");
   coach.lifecycle.abortKind("score");
+  clearTeacherState({ clearContext: true });
   const token = coach.beginFinalScore();
   elements.busyOverlay.style.display = "flex";
   try {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -59,6 +60,8 @@ def test_coach_contract_rejects_non_finite_rich_points():
 
 
 def test_health_reports_coach_and_deep_readiness_separately(monkeypatch):
+    monkeypatch.delenv("LINGO_SERVICE_MODE", raising=False)
+
     class GeometryEngine:
         mode = "geometry-only"
 
@@ -74,10 +77,54 @@ def test_health_reports_coach_and_deep_readiness_separately(monkeypatch):
     assert body["ok"] is True
     assert body["protocol_version"] == 1
     assert body["build_sha"] == server.BUILD_SHA
+    assert body["service_mode"] == "full"
+    assert body["teacher_ready"] is True
     assert body["coach_ready"] is True
     assert body["coach_engine"] == "geometry-only"
     assert body["deep_score_ready"] is False
     assert body["deep_model_loading"] is True
+
+
+def test_teacher_only_lifespan_skips_all_scorer_preloads(monkeypatch):
+    monkeypatch.setenv("LINGO_SERVICE_MODE", "teacher-only")
+    monkeypatch.setattr(server, "_coach_engine", None)
+    monkeypatch.setattr(server, "_model", None)
+    calls = []
+
+    def coach_loader():
+        calls.append("coach")
+
+    def deep_loader():
+        calls.append("deep")
+
+    class ImmediateThread:
+        def __init__(self, *, target, args, daemon):
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(server, "get_coach_engine", coach_loader)
+    monkeypatch.setattr(server, "get_model", deep_loader)
+    monkeypatch.setattr(
+        server,
+        "threading",
+        SimpleNamespace(Thread=ImmediateThread),
+    )
+
+    with TestClient(server.app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["service_mode"] == "teacher-only"
+    assert body["teacher_ready"] is True
+    assert body["coach_ready"] is False
+    assert body["deep_score_ready"] is False
+    assert calls == []
 
 
 def test_explicit_geometry_only_mode_does_not_load_the_stroke_model(monkeypatch):

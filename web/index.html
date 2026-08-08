@@ -44,6 +44,17 @@
     <span id="coach-icon" aria-hidden="true">○</span>
     <span id="coach-text">가이드를 준비하고 있습니다.</span>
   </div>
+  <div id="teacher-actions" hidden>
+    <button id="teacher-explain" type="button" aria-controls="teacher-feedback">
+      AI 선생님 설명 · 왜?
+    </button>
+    <span id="teacher-request-status" aria-live="polite"></span>
+  </div>
+  <div id="teacher-feedback" hidden role="status" aria-live="polite">
+    <div id="teacher-source">선생님 설명</div>
+    <div id="teacher-primary"></div>
+    <div id="teacher-secondary" hidden></div>
+  </div>
   <div id="result"></div>
 
   <div id="picker" role="dialog" aria-modal="true" aria-label="문자 선택">

@@ -6,3 +6,5 @@ pillow
 fastapi
 uvicorn
 pydantic
+openai==2.53.0
+python-dotenv>=1.1,<2

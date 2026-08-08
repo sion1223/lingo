@@ -36,6 +36,17 @@ test("starting a new stroke can abort only outstanding coach refinements", () =>
   assert.equal(lifecycle.isCurrent(templateRequest), true);
 });
 
+test("a new diagnosis can abort only an outstanding teacher explanation", () => {
+  const lifecycle = new AttemptLifecycle();
+  const teacherRequest = lifecycle.createRequest("verbalize");
+  const scoreRequest = lifecycle.createRequest("score");
+
+  assert.equal(lifecycle.abortKind("verbalize"), 1);
+  assert.equal(teacherRequest.controller.signal.aborted, true);
+  assert.equal(lifecycle.isCurrent(teacherRequest), false);
+  assert.equal(lifecycle.isCurrent(scoreRequest), true);
+});
+
 test("state machine accepts a good stroke and undo restores the expected prefix", () => {
   const coach = new LocalCoachController({ templateStrokes: template });
   assert.equal(coach.machine.state, TUTOR_STATES.READY_TO_DRAW);

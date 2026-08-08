@@ -5,6 +5,7 @@ POST /score    {"char": "永", "strokes": [[[x,y],...], ...]}  -> 채점 리포�
 GET  /template/{char}                                          -> 정답 획 궤적
 GET  /health                                                   -> 상태 확인
 """
+import hmac
 import json
 import logging
 import os
@@ -14,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -26,6 +27,8 @@ from scorer.hybrid import HybridScorer, load_stroke_scorer
 from scorer.kanjivg import char_to_file, load_char
 from scorer.realtime import FastCoachEngine, InvalidStroke, TemplateUnavailable
 from scorer.schemas import ApiErrorCode, CoachStrokeRequest, CoachStrokeResponse
+from scorer.teacher_renderer import TeacherRenderer, deterministic_fallback
+from scorer.teacher_schemas import TeacherFeedbackEnvelope, TeacherFeedbackRequest
 
 KANJI_DIR = os.environ.get('KANJI_DIR', 'kanji')
 CKPT = os.environ.get('CKPT', 'checkpoints/chandra_scorer.pt')
@@ -40,6 +43,27 @@ COACH_ENGINE_MODE = os.environ.get('COACH_ENGINE', 'auto').strip().lower()
 if COACH_ENGINE_MODE not in {'auto', 'geometry-only'}:
     LOGGER.warning('unknown COACH_ENGINE=%r; using auto', COACH_ENGINE_MODE)
     COACH_ENGINE_MODE = 'auto'
+
+DEFAULT_TEACHER_MAX_CONCURRENCY = 4
+MAX_TEACHER_MAX_CONCURRENCY = 32
+
+
+def _configured_service_mode():
+    value = os.environ.get('LINGO_SERVICE_MODE', 'full').strip().lower()
+    return value if value in {'full', 'teacher-only'} else 'full'
+
+
+def _configured_teacher_concurrency():
+    try:
+        value = int(os.environ.get(
+            'TEACHER_MAX_CONCURRENCY',
+            DEFAULT_TEACHER_MAX_CONCURRENCY,
+        ))
+    except (TypeError, ValueError):
+        return DEFAULT_TEACHER_MAX_CONCURRENCY
+    if not 1 <= value <= MAX_TEACHER_MAX_CONCURRENCY:
+        return DEFAULT_TEACHER_MAX_CONCURRENCY
+    return value
 
 _model = None
 _loaded_at = None
@@ -57,6 +81,10 @@ _coach_engine = None
 _coach_loaded_at = None
 _coach_load_error = None
 _coach_lock = threading.Lock()
+
+_teacher_renderer = None
+_teacher_lock = threading.Lock()
+_teacher_slots = threading.BoundedSemaphore(_configured_teacher_concurrency())
 
 
 def get_stroke_model():
@@ -99,6 +127,88 @@ def get_coach_engine():
                 _coach_load_error = type(exc).__name__
                 raise
     return _coach_engine
+
+
+def get_teacher_renderer():
+    """Return the lazy language renderer without loading either scoring model."""
+    global _teacher_renderer
+    with _teacher_lock:
+        if _teacher_renderer is None:
+            _teacher_renderer = TeacherRenderer()
+    return _teacher_renderer
+
+
+def require_teacher_api_token(
+    x_lingo_teacher_token: str | None = Header(
+        default=None,
+        alias='X-Lingo-Teacher-Token',
+    ),
+):
+    """Require the private Edge-to-scorer token only when configured."""
+    expected = os.environ.get('TEACHER_API_TOKEN')
+    if not expected:
+        return
+    supplied = x_lingo_teacher_token or ''
+    matches = hmac.compare_digest(
+        supplied.encode('utf-8'),
+        expected.encode('utf-8'),
+    )
+    if matches:
+        return
+    if x_lingo_teacher_token is None:
+        raise HTTPException(
+            status_code=401,
+            detail={
+                'code': 'TEACHER_TOKEN_REQUIRED',
+                'message': '교사 API 인증 토큰이 필요합니다',
+            },
+        )
+    raise HTTPException(
+        status_code=403,
+        detail={
+            'code': 'TEACHER_TOKEN_INVALID',
+            'message': '교사 API 인증 토큰이 올바르지 않습니다',
+        },
+    )
+
+
+def _teacher_fallback_envelope(req, purpose, reason, started):
+    return TeacherFeedbackEnvelope(
+        feedback=deterministic_fallback(req, purpose=purpose),
+        source='fallback',
+        model=None,
+        fallback_reason=reason,
+        latency_ms=(time.perf_counter() - started) * 1000,
+        cached=False,
+        usage=None,
+    )
+
+
+def _render_teacher(req, purpose):
+    """Fail fast when all provider slots are occupied; never queue scoring."""
+    started = time.perf_counter()
+    if not _teacher_slots.acquire(blocking=False):
+        return _teacher_fallback_envelope(
+            req,
+            purpose,
+            'capacity_exceeded',
+            started,
+        )
+    try:
+        return get_teacher_renderer().render(req, purpose=purpose)
+    except Exception as exc:
+        LOGGER.warning(
+            'teacher feedback rendering failed (%s)',
+            type(exc).__name__,
+        )
+        return _teacher_fallback_envelope(
+            req,
+            purpose,
+            'api_error',
+            started,
+        )
+    finally:
+        _teacher_slots.release()
 
 
 def _configured_stroke_weight():
@@ -151,13 +261,14 @@ def _warm(loader, label):
 
 @asynccontextmanager
 async def lifespan(_app):
-    # The realtime path and deep final scorer warm independently.
-    threading.Thread(
-        target=_warm, args=(get_coach_engine, 'coach'), daemon=True
-    ).start()
-    threading.Thread(
-        target=_warm, args=(get_model, 'deep scorer'), daemon=True
-    ).start()
+    if _configured_service_mode() == 'full':
+        # The realtime path and deep final scorer warm independently.
+        threading.Thread(
+            target=_warm, args=(get_coach_engine, 'coach'), daemon=True
+        ).start()
+        threading.Thread(
+            target=_warm, args=(get_model, 'deep scorer'), daemon=True
+        ).start()
     yield
 
 
@@ -233,12 +344,17 @@ def chars():
 @app.get('/health')
 def health():
     import torch
+    service_mode = _configured_service_mode()
+    teacher_ready = True  # The deterministic fallback is always available.
     coach_ready = _coach_engine is not None
     deep_ready = _model is not None and _load_error is None
+    healthy = teacher_ready if service_mode == 'teacher-only' else coach_ready
     content = dict(
-        ok=coach_ready,
+        ok=healthy,
         protocol_version=PROTOCOL_VERSION,
         build_sha=BUILD_SHA,
+        service_mode=service_mode,
+        teacher_ready=teacher_ready,
         coach_ready=coach_ready,
         coach_engine=_coach_engine.mode if coach_ready else None,
         coach_load_error=_coach_load_error,
@@ -256,7 +372,7 @@ def health():
         ),
         load_seconds=_loaded_at,
     )
-    return JSONResponse(content=content, status_code=200 if coach_ready else 503)
+    return JSONResponse(content=content, status_code=200 if healthy else 503)
 
 
 @app.get('/template/{char}')
@@ -287,6 +403,24 @@ def coach_stroke(req: CoachStrokeRequest):
             'code': ApiErrorCode.COACH_FAILED.value,
             'message': '획을 분석하지 못했습니다',
         }) from exc
+
+
+@app.post('/coach/verbalize', response_model=TeacherFeedbackEnvelope)
+def coach_verbalize(
+    req: TeacherFeedbackRequest,
+    _authorization: None = Depends(require_teacher_api_token),
+):
+    """Render locked evidence; provider failures return deterministic feedback."""
+    return _render_teacher(req, purpose='verbalize')
+
+
+@app.post('/coach/summary', response_model=TeacherFeedbackEnvelope)
+def coach_summary(
+    req: TeacherFeedbackRequest,
+    _authorization: None = Depends(require_teacher_api_token),
+):
+    """Render a completion summary without entering either scoring hot path."""
+    return _render_teacher(req, purpose='summary')
 
 
 @app.post('/score')

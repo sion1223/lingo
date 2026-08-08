@@ -109,15 +109,22 @@ baseline이 고정되기 전에는 model v2나 LLM 구현을 시작하지 않는
 
 ### C6 — LLM pedagogical renderer
 
-- [ ] `/coach/verbalize`, `/coach/summary` 또는 동등한 비동기 경로
-- [ ] versioned input/output JSON Schema
-- [ ] locked decision field
-- [ ] strict structured output + semantic validator
-- [ ] cache, timeout, refusal, 5xx fallback
-- [ ] 원시 좌표·이미지·사용자 식별 정보 기본 전송 금지
+이번 C6 구현은 명시적 vertical-slice 지시로 API부터 UI까지 연결한 것이다. C0~C5의 confusion
+baseline·실제 competitor margin·구조화 evidence 품질 gate를 완료했다는 뜻은 아니다.
+
+- [x] 명시적 `왜?` 비동기 UI와 `/coach/verbalize`, `/coach/summary` backend 경로
+- [x] `teacher_feedback.v1` versioned input/output JSON Schema
+- [x] locked decision field
+- [x] strict structured output + 유한 approved-language option + semantic validator
+- [x] cache, timeout, refusal, 5xx fallback
+- [x] 원시 좌표·이미지·사용자 식별 정보 기본 전송 금지
 - [ ] 반복 오류, `왜?`, hint 상승, 문자/세션 요약에서만 호출
-- [ ] 최소 1,000 synthetic case에서 모순·환각·fallback 평가
+- [x] 최소 1,000 로컬 synthetic case에서 validator·fallback·모순 mutation 평가
+- [ ] 실제 Luna generation 1,000건의 hallucination/locked-decision batch gate
 - [ ] deterministic template 대비 명확성·실행 가능성·비용·latency 비교
+- [ ] 공개 Edge 사용자별 rate limit·일일 비용 예산 설정
+
+구현·실제 Luna 호출 기록: [`validation/GPT56_LUNA_TEACHER_FEEDBACK_20260808.md`](validation/GPT56_LUNA_TEACHER_FEEDBACK_20260808.md)
 
 ### 모델 품질 합격 조건
 

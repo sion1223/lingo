@@ -158,6 +158,59 @@ button:focus-visible, input:focus-visible { outline: 3px solid #84adff; outline-
   font-weight: 800;
 }
 
+#teacher-actions {
+  width: min(100%, 520px);
+  margin-top: 8px;
+}
+
+#teacher-actions:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#teacher-explain {
+  min-height: 40px;
+  border: 1px solid #9bb8e8;
+  background: #edf4ff;
+  color: #174b9b;
+  font-weight: 650;
+}
+
+#teacher-explain:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+#teacher-request-status {
+  color: #667085;
+  font-size: 12px;
+}
+
+#teacher-feedback {
+  width: min(100%, 520px);
+  margin-top: 8px;
+  padding: 12px 14px;
+  border: 1px solid #9bb8e8;
+  border-radius: 12px;
+  background: #f8fbff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+#teacher-source {
+  margin-bottom: 4px;
+  color: #175cd3;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#teacher-secondary {
+  margin-top: 4px;
+  color: #475467;
+}
+
 #result {
   width: 100%;
   max-width: 520px;

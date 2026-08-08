@@ -58,7 +58,7 @@ export class ApiClient {
       const response = await fetch(this.config.edgeEndpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify({ action, ...payload }),
+        body: JSON.stringify({ ...payload, action }),
         signal,
       });
       return parseResponse(response);
@@ -83,6 +83,14 @@ export class ApiClient {
       };
     } else if (action === "coach") {
       url = joinUrl(base, "/coach/stroke");
+      init = {
+        ...init,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      };
+    } else if (action === "verbalize" || action === "summary") {
+      url = joinUrl(base, action === "summary" ? "/coach/summary" : "/coach/verbalize");
       init = {
         ...init,
         method: "POST",

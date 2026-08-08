@@ -26,3 +26,56 @@ test("direct API mode posts the complete coach contract to /coach/stroke", async
     globalThis.fetch = originalFetch;
   }
 });
+
+test("direct API mode routes teacher verbalize and summary separately", async () => {
+  const originalFetch = globalThis.fetch;
+  const captured = [];
+  globalThis.fetch = async (url, init) => {
+    captured.push({ url, init });
+    return new Response('{"source":"fallback"}', {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    const client = new ApiClient({ apiBaseUrl: "https://api.example.test/" });
+    const payload = { schema_version: "teacher_feedback.v1" };
+    await client.request("verbalize", payload);
+    await client.request("summary", payload);
+
+    assert.equal(captured[0].url, "https://api.example.test/coach/verbalize");
+    assert.equal(captured[1].url, "https://api.example.test/coach/summary");
+    for (const request of captured) {
+      assert.equal(request.init.method, "POST");
+      assert.deepEqual(JSON.parse(request.init.body), payload);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Edge API mode pins the selected action after the structured payload", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured;
+  globalThis.fetch = async (url, init) => {
+    captured = { url, init };
+    return new Response("{}", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    const client = new ApiClient({ edgeEndpoint: "https://edge.example.test/score" });
+    await client.request("verbalize", {
+      action: "score",
+      schema_version: "teacher_feedback.v1",
+    });
+    assert.equal(captured.url, "https://edge.example.test/score");
+    assert.deepEqual(JSON.parse(captured.init.body), {
+      action: "verbalize",
+      schema_version: "teacher_feedback.v1",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

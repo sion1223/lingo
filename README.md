@@ -37,6 +37,7 @@ node web/benchmark-local.mjs
 python -m scorer.benchmark_realtime --engine geometry-only
 python -m scorer.benchmark_realtime --engine geometry+stroke-model
 python scripts/validate_runpod.py --help
+python scripts/validate_teacher_feedback.py --cases 1000
 ```
 
 로컬 서버는 저장소 루트에서 다음처럼 실행한다.
@@ -57,6 +58,31 @@ python -m uvicorn scorer.server:app --host 127.0.0.1 --port 8000
 Supabase `score` 함수에는 `RUNPOD_BASE_URL`, 안정적인 `lingo` 진입점에는 Pod와 무관한 정적
 `web/` 배포 주소인 `LINGO_STATIC_APP_URL`을 secret/env로 설정한다. 실제 RunPod 검증 결과는
 원시 응답 대신 `scripts/validate_runpod.py`가 만든 집계 JSON을 바탕으로 문서화한다.
+
+## GPT-5.6 Luna 교사 피드백
+
+`POST /coach/verbalize`와 `POST /coach/summary`는 채점 결과를 새로 판단하지 않고,
+`teacher_feedback.v1`의 잠긴 판정과 구조화 evidence만 사용한다. 서버가 근거별로 만든 유한한
+안전 문구 후보 중에서 Luna가 학습자 맥락과 호출 목적에 맞는 전략을 고르고, 후보를 섞거나
+재작성한 출력은 semantic validator가 폐기한다. 기본 모델은 정확히 `gpt-5.6-luna`이며 API 오류,
+timeout, refusal, 스키마·의미 검증 실패 시 기존 채점과 필기 흐름을 막지 않고 결정론적 문구로
+강등된다.
+
+로컬에서는 저장소 루트의 추적되지 않는 `.env.local`에 `OPENAI_API_KEY`를 둔다. 키는 서버에서만
+읽으며 HTML, 브라우저 설정, Edge 요청 본문에는 넣지 않는다. 실제 API까지 검증하려면 다음을 실행한다.
+
+```bash
+python -m pip install -r requirements-serve.txt
+python scripts/validate_teacher_feedback.py --cases 1000 --live
+```
+
+웹의 `AI 선생님 설명 · 왜?` 버튼은 사용자가 명시적으로 선택했을 때만 이 경로를 호출한다.
+원시 획 좌표, 필기 이미지, 필압 시계열, 세션·사용자 식별자는 Luna 요청에 포함하지 않는다.
+v1의 문자 범위는 kana/CJK ideograph이며, 그 밖의 radical·문장부호는 기존 로컬 코치만 유지한다.
+원격 운영에서는 Edge의 `TEACHER_BASE_URL`을 별도 CPU FastAPI에 연결할 수 있으므로 심층
+`/score`용 RunPod가 없어도 Luna 설명은 동작한다. 공개 배포 시 Edge와 FastAPI에 같은
+`TEACHER_API_TOKEN`을 설정해야 한다. 삭제된 기존 Pod 대신 심층 `/score`를 다시 쓰려면 새
+RunPod 배포가 별도로 필요하다.
 
 실시간 로컬 코치의 기준선과 검증 결과는
 [docs/REALTIME_TUTOR_BASELINE.md](docs/REALTIME_TUTOR_BASELINE.md)에 기록한다.
