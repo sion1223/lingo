@@ -4,3 +4,4 @@ __pycache__/
 .env.local
 demo_feedback.png
 checkpoints/chandra_scorer.pt
+artifacts/

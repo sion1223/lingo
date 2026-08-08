@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lingo.local/schemas/confusion-registry.v1.json",
+  "title": "Lingo confusion registry v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "version",
+    "fixture_policy",
+    "pairs"
+  ],
+  "properties": {
+    "schema_version": {"const": "confusion_registry.v1"},
+    "registry_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,63}$"
+    },
+    "version": {"type": "integer", "minimum": 1},
+    "fixture_policy": {"$ref": "#/$defs/fixture_policy"},
+    "pairs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/pair"}
+    }
+  },
+  "$defs": {
+    "fixture_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generator_version",
+        "samples_per_direction",
+        "style_severity",
+        "morph_alphas",
+        "baseline_split",
+        "split_seeds"
+      ],
+      "properties": {
+        "generator_version": {"const": "confusion_fixture.v1"},
+        "samples_per_direction": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "style_severity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "morph_alphas": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "exclusiveMaximum": 1
+          }
+        },
+        "baseline_split": {
+          "type": "string",
+          "enum": ["train", "validation", "test"]
+        },
+        "split_seeds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["train", "validation", "test"],
+          "properties": {
+            "train": {"type": "integer", "minimum": 0},
+            "validation": {"type": "integer", "minimum": 0},
+            "test": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pair_id",
+        "script",
+        "characters",
+        "source",
+        "directions"
+      ],
+      "properties": {
+        "pair_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,95}$"
+        },
+        "script": {
+          "type": "string",
+          "enum": ["hiragana", "katakana", "cjk"]
+        },
+        "characters": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 2}
+        },
+        "source": {
+          "type": "string",
+          "enum": ["manual_seed", "template_mined", "model_mined"]
+        },
+        "directions": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/direction"}
+        }
+      }
+    },
+    "direction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_char",
+        "competitor_char",
+        "critical_stroke",
+        "critical_region",
+        "target_profile",
+        "competitor_profile",
+        "evidence_codes"
+      ],
+      "properties": {
+        "target_char": {"type": "string", "minLength": 1, "maxLength": 2},
+        "competitor_char": {"type": "string", "minLength": 1, "maxLength": 2},
+        "critical_stroke": {"type": "integer", "minimum": 0, "maximum": 63},
+        "critical_region": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,63}$"
+        },
+        "target_profile": {"$ref": "#/$defs/profile"},
+        "competitor_profile": {"$ref": "#/$defs/profile"},
+        "evidence_codes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/evidence_code"}
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 64}
+    },
+    "evidence_code": {
+      "type": "string",
+      "enum": [
+        "START_TOO_HIGH",
+        "START_TOO_LOW",
+        "START_TOO_LEFT",
+        "START_TOO_RIGHT",
+        "END_TOO_HIGH",
+        "END_TOO_LOW",
+        "STROKE_TOO_LONG",
+        "STROKE_TOO_SHORT",
+        "STROKE_TOO_VERTICAL",
+        "STROKE_TOO_HORIZONTAL",
+        "STROKE_ANGLE_MISMATCH",
+        "CURVE_TOO_EARLY",
+        "CURVE_TOO_LATE",
+        "TERMINAL_HOOK_WRONG_DIRECTION",
+        "INTER_STROKE_GAP_TOO_SMALL",
+        "INTER_STROKE_GAP_TOO_LARGE",
+        "CHARACTER_RESEMBLES_COMPETITOR",
+        "AMBIGUOUS_BETWEEN_CHARACTERS"
+      ]
+    }
+  }
+}

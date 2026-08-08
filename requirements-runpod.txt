@@ -6,3 +6,4 @@ accelerate
 safetensors
 pillow
 matplotlib
+PyYAML>=6,<7

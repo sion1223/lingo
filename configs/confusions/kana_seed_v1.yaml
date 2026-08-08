@@ -1,0 +1,59 @@
+schema_version: confusion_registry.v1
+registry_id: kana_seed_v1
+version: 1
+
+fixture_policy:
+  generator_version: confusion_fixture.v1
+  samples_per_direction: 16
+  style_severity: 0.12
+  morph_alphas: [0.25, 0.5, 0.75]
+  baseline_split: test
+  split_seeds:
+    train: 2026080901
+    validation: 2026080902
+    test: 2026080903
+
+pairs:
+  - pair_id: hiragana_3044_308a
+    script: hiragana
+    characters: ["い", "り"]
+    source: manual_seed
+    directions:
+      - target_char: "い"
+        competitor_char: "り"
+        critical_stroke: 1
+        critical_region: stroke_2_start_and_lower_tail
+        target_profile:
+          primary_direction: down_right
+          relative_length: shorter
+          start_height: middle
+          terminal_shape: no_deep_tail
+        competitor_profile:
+          primary_direction: mostly_down
+          relative_length: long
+          start_height: high
+          terminal_shape: long_lower_tail_left_curve
+        evidence_codes:
+          - START_TOO_HIGH
+          - STROKE_TOO_LONG
+          - STROKE_TOO_VERTICAL
+          - CHARACTER_RESEMBLES_COMPETITOR
+      - target_char: "り"
+        competitor_char: "い"
+        critical_stroke: 1
+        critical_region: stroke_2_start_and_lower_tail
+        target_profile:
+          primary_direction: mostly_down
+          relative_length: long
+          start_height: high
+          terminal_shape: long_lower_tail_left_curve
+        competitor_profile:
+          primary_direction: down_right
+          relative_length: shorter
+          start_height: middle
+          terminal_shape: no_deep_tail
+        evidence_codes:
+          - START_TOO_LOW
+          - STROKE_TOO_SHORT
+          - STROKE_ANGLE_MISMATCH
+          - CHARACTER_RESEMBLES_COMPETITOR
