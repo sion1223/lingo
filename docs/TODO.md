@@ -50,16 +50,18 @@ RunPod 접근 권한이 없거나 실제 Pod를 시작하지 못한 경우 Phase
 - [x] `い↔り`를 mandatory pair로 등록
 - [x] `kanji/03044.svg`, `kanji/0308a.svg` 기반 deterministic fixture 생성
 - [x] 현재 stroke checkpoint의 `い→り`, `り→い` 로컬 양방향 false acceptance 측정
-- [ ] 현재 Chandra/hybrid checkpoint의 실제 CUDA 양방향 false acceptance 측정
+- [x] 현재 Chandra/hybrid checkpoint의 실제 CUDA 양방향 false acceptance 측정
 - [x] target true acceptance, pairwise margin, candidate accuracy, calibration proxy 측정
 - [x] 자동 template-neighbor mining prototype 추가
-- [ ] 실제 RunPod에서 exact SHA/checkpoint로 baseline 재현
+- [x] 실제 RunPod에서 exact SHA/checkpoint로 baseline 재현
 - [x] `docs/validation/CONFUSION_BASELINE_<YYYYMMDD>.md` 작성
+- [x] raw 산출물 로컬 회수·해시 검증 후 Pod Terminate와 잔여 Pod/network volume 0 확인
 
-로컬 결과와 미실행 gate: [`validation/CONFUSION_BASELINE_20260809.md`](validation/CONFUSION_BASELINE_20260809.md).
-C0 전체는 Chandra/hybrid RunPod 재현 전까지 완료가 아니다.
+로컬 기준선: [`validation/CONFUSION_BASELINE_20260809.md`](validation/CONFUSION_BASELINE_20260809.md).
+실제 CUDA 재현: [`validation/CONFUSION_BASELINE_RUNPOD_20260811.md`](validation/CONFUSION_BASELINE_RUNPOD_20260811.md).
+C0 seed baseline은 완료했다. 기존 Chandra/hybrid 품질은 합격하지 않았으며 다음 모델 작업은 C1부터 진행한다.
 
-baseline이 고정되기 전에는 model v2나 LLM 구현을 시작하지 않는다.
+새 checkpoint의 model v2 합격을 주장하기 전에는 C1~C5와 실제 writer/worst-pair gate를 별도로 완료한다.
 
 ### C1 — hard-negative 데이터
 

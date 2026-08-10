@@ -1,8 +1,12 @@
 # Confusion C0 local baseline — 2026-08-09
 
+> 2026-08-11 후속 RunPod CUDA gate는
+> [`CONFUSION_BASELINE_RUNPOD_20260811.md`](CONFUSION_BASELINE_RUNPOD_20260811.md)에서 완료했다.
+> 아래 내용은 2026-08-09 로컬 측정 당시의 기록으로 보존한다.
+
 ## 판정
 
-**부분 완료 / RunPod gate 미완료.** `い↔り` registry, deterministic fixture, 가나
+**2026-08-09 당시 부분 완료 / RunPod gate 미완료.** `い↔り` registry, deterministic fixture, 가나
 template-neighbor mining, metric harness와 현재 stroke checkpoint의 로컬 기준선은 고정했다.
 이 PC는 CUDA가 없어 Chandra와 hybrid는 실행하지 않았다. 새 유료 RunPod를 만들거나 외부 배포를
 변경하지 않았으며, 따라서 이 문서는 C0 전체 완료나 모델 개선의 합격 근거가 아니다.
@@ -124,7 +128,7 @@ margin은 음수였다. 이 결과 역시 단일 품질 threshold와 pairwise id
 
 첫 실행 초기화 outlier를 포함한다. 이 수치는 RunPod GPU 또는 브라우저 왕복 latency가 아니다.
 
-## 실행하지 않은 gate
+## 2026-08-09에 실행하지 않은 gate
 
 | Gate | 상태 | 이유 |
 |---|---|---|
@@ -169,9 +173,10 @@ Raw prediction JSON과 graph JSON은 Git에서 제외된 `artifacts/`에만 두�
 - `python -m compileall -q scorer tests`: pass
 - `git diff --check`: pass
 
-## 다음 단일 실험
+## 당시 다음 단일 실험
 
-새 RunPod를 만들 권한과 비용 범위가 확인되면 이 evaluator source SHA를 push하고, 위 strict 명령으로
+이 실험은 2026-08-11 후속 보고서에서 완료했다. 원래 계획은 evaluator source SHA를 push하고,
+위 strict 명령으로
 Chandra·hybrid의 동일 192 fixture 결과와 GPU p50/p95/peak VRAM을 먼저 채운다. 그 결과를 고정하기
 전에는 threshold를 바꾸거나 C1 hard-negative 학습을 시작하지 않는다. 측정 후 Pod는 Stop하고 상태를
 기록하며, 사용자 지시 없이 Terminate하지 않는다.
