@@ -266,6 +266,8 @@ FallbackReason = Literal[
     "schema_error",
     "semantic_error",
     "capacity_exceeded",
+    "rate_limited",
+    "daily_budget_exceeded",
 ]
 
 

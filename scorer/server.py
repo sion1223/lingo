@@ -5,17 +5,20 @@ POST /score    {"char": "永", "strokes": [[[x,y],...], ...]}  -> 채점 리포�
 GET  /template/{char}                                          -> 정답 획 궤적
 GET  /health                                                   -> 상태 확인
 """
+import hashlib
 import hmac
 import json
 import logging
 import os
 import threading
 import time
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -46,6 +49,11 @@ if COACH_ENGINE_MODE not in {'auto', 'geometry-only'}:
 
 DEFAULT_TEACHER_MAX_CONCURRENCY = 4
 MAX_TEACHER_MAX_CONCURRENCY = 32
+DEFAULT_TEACHER_RATE_LIMIT_PER_MINUTE = 60
+MAX_TEACHER_RATE_LIMIT_PER_MINUTE = 600
+DEFAULT_TEACHER_DAILY_REQUEST_LIMIT = 1000
+MAX_TEACHER_DAILY_REQUEST_LIMIT = 100000
+MAX_TEACHER_CLIENT_BUCKETS = 4096
 
 
 def _configured_service_mode():
@@ -64,6 +72,85 @@ def _configured_teacher_concurrency():
     if not 1 <= value <= MAX_TEACHER_MAX_CONCURRENCY:
         return DEFAULT_TEACHER_MAX_CONCURRENCY
     return value
+
+
+def _configured_positive_int(name, default, maximum):
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    if not 1 <= value <= maximum:
+        return default
+    return value
+
+
+def _configured_teacher_rate_limit():
+    return _configured_positive_int(
+        'TEACHER_RATE_LIMIT_PER_MINUTE',
+        DEFAULT_TEACHER_RATE_LIMIT_PER_MINUTE,
+        MAX_TEACHER_RATE_LIMIT_PER_MINUTE,
+    )
+
+
+def _configured_teacher_daily_limit():
+    return _configured_positive_int(
+        'TEACHER_DAILY_REQUEST_LIMIT',
+        DEFAULT_TEACHER_DAILY_REQUEST_LIMIT,
+        MAX_TEACHER_DAILY_REQUEST_LIMIT,
+    )
+
+
+class TeacherRequestBudget:
+    """Bound public provider traffic without retaining raw client addresses."""
+
+    def __init__(
+        self,
+        per_minute,
+        daily_limit,
+        *,
+        monotonic_clock=time.monotonic,
+        utc_day_clock=None,
+    ):
+        self.per_minute = per_minute
+        self.daily_limit = daily_limit
+        self._monotonic_clock = monotonic_clock
+        self._utc_day_clock = utc_day_clock or (
+            lambda: datetime.now(timezone.utc).date().isoformat()
+        )
+        self._lock = threading.Lock()
+        self._client_windows = OrderedDict()
+        self._day = self._utc_day_clock()
+        self._daily_count = 0
+
+    def consume(self, client_key):
+        with self._lock:
+            day = self._utc_day_clock()
+            if day != self._day:
+                self._day = day
+                self._daily_count = 0
+                self._client_windows.clear()
+
+            if self._daily_count >= self.daily_limit:
+                return 'daily_budget_exceeded'
+
+            now = self._monotonic_clock()
+            cutoff = now - 60.0
+            window = self._client_windows.get(client_key)
+            if window is None:
+                window = deque()
+                self._client_windows[client_key] = window
+            else:
+                self._client_windows.move_to_end(client_key)
+            while window and window[0] <= cutoff:
+                window.popleft()
+            if len(window) >= self.per_minute:
+                return 'rate_limited'
+
+            window.append(now)
+            self._daily_count += 1
+            while len(self._client_windows) > MAX_TEACHER_CLIENT_BUCKETS:
+                self._client_windows.popitem(last=False)
+            return None
 
 _model = None
 _loaded_at = None
@@ -85,6 +172,11 @@ _coach_lock = threading.Lock()
 _teacher_renderer = None
 _teacher_lock = threading.Lock()
 _teacher_slots = threading.BoundedSemaphore(_configured_teacher_concurrency())
+_teacher_request_budget = TeacherRequestBudget(
+    _configured_teacher_rate_limit(),
+    _configured_teacher_daily_limit(),
+)
+_teacher_client_salt = os.urandom(16)
 
 
 def get_stroke_model():
@@ -172,6 +264,18 @@ def require_teacher_api_token(
     )
 
 
+def _teacher_client_key(request):
+    forwarded = request.headers.get('x-forwarded-for', '')
+    address = forwarded.split(',', 1)[0].strip()
+    if not address and request.client is not None:
+        address = request.client.host
+    if not address:
+        address = 'unknown'
+    return hashlib.sha256(
+        _teacher_client_salt + address.encode('utf-8', errors='replace')
+    ).hexdigest()
+
+
 def _teacher_fallback_envelope(req, purpose, reason, started):
     return TeacherFeedbackEnvelope(
         feedback=deterministic_fallback(req, purpose=purpose),
@@ -184,9 +288,20 @@ def _teacher_fallback_envelope(req, purpose, reason, started):
     )
 
 
-def _render_teacher(req, purpose):
+def _render_teacher(req, purpose, request=None):
     """Fail fast when all provider slots are occupied; never queue scoring."""
     started = time.perf_counter()
+    if request is not None:
+        limit_reason = _teacher_request_budget.consume(
+            _teacher_client_key(request)
+        )
+        if limit_reason is not None:
+            return _teacher_fallback_envelope(
+                req,
+                purpose,
+                limit_reason,
+                started,
+            )
     if not _teacher_slots.acquire(blocking=False):
         return _teacher_fallback_envelope(
             req,
@@ -355,6 +470,8 @@ def health():
         build_sha=BUILD_SHA,
         service_mode=service_mode,
         teacher_ready=teacher_ready,
+        teacher_rate_limit_per_minute=_teacher_request_budget.per_minute,
+        teacher_daily_request_limit=_teacher_request_budget.daily_limit,
         coach_ready=coach_ready,
         coach_engine=_coach_engine.mode if coach_ready else None,
         coach_load_error=_coach_load_error,
@@ -408,19 +525,21 @@ def coach_stroke(req: CoachStrokeRequest):
 @app.post('/coach/verbalize', response_model=TeacherFeedbackEnvelope)
 def coach_verbalize(
     req: TeacherFeedbackRequest,
+    request: Request,
     _authorization: None = Depends(require_teacher_api_token),
 ):
     """Render locked evidence; provider failures return deterministic feedback."""
-    return _render_teacher(req, purpose='verbalize')
+    return _render_teacher(req, purpose='verbalize', request=request)
 
 
 @app.post('/coach/summary', response_model=TeacherFeedbackEnvelope)
 def coach_summary(
     req: TeacherFeedbackRequest,
+    request: Request,
     _authorization: None = Depends(require_teacher_api_token),
 ):
     """Render a completion summary without entering either scoring hot path."""
-    return _render_teacher(req, purpose='summary')
+    return _render_teacher(req, purpose='summary', request=request)
 
 
 @app.post('/score')

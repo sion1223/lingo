@@ -12,9 +12,8 @@
 - **웹앱**: `web/` 디렉터리를 항상 켜진 정적 호스트에 한 묶음으로 배포한다. Supabase의
   안정적인 `lingo` 진입점은 `LINGO_STATIC_APP_URL` 환경변수의 주소로만 리다이렉트하며 HTML을
   별도로 복사해 갖지 않는다. 따라서 Pod가 Stop이어도 앱 셸과 내장 핵심 5문자 코치는 열린다.
-- **RunPod pod**: 기존 `lingo-scorer` ID `l8faq6mx5shxpc`는 2026-08-08 조회 시 계정에 존재하지
-  않는다. 심층 `/score`를 다시 운영하려면 새 Pod와 볼륨을 만들고 `RUNPOD_BASE_URL` 및 세션
-  스크립트의 Pod ID를 새 값으로 갱신해야 한다.
+- **RunPod pod**: 현재 Pod ID와 proxy URL은 배포 시 RunPod 콘솔/API에서 확인한다. 임시 Pod ID와
+  proxy URL은 소스에 하드코딩하지 않고 `RUNPOD_BASE_URL` 같은 배포 환경변수로만 연결한다.
 - **채점 서버 주소**: Supabase `score` 함수의 `RUNPOD_BASE_URL` 환경변수로만 주입한다.
 - **제출 기록**: Supabase `submissions` 테이블 (문자, 획, 점수, 리포트 자동 저장)
 
@@ -32,6 +31,8 @@
 | FastAPI 서버 | `OPENAI_TEACHER_TIMEOUT_SECONDS` | 교사 renderer timeout, 기본 8초 |
 | FastAPI 서버 | `TEACHER_FEEDBACK_CACHE_SIZE` | 검증된 문장 LRU 크기, 기본 128 |
 | FastAPI 서버 | `TEACHER_MAX_CONCURRENCY` | 프로세스당 Luna 동시 호출 상한, 기본 4(1~32) |
+| FastAPI 서버 | `TEACHER_RATE_LIMIT_PER_MINUTE` | 공개 교사 API의 익명 클라이언트별 분당 요청 상한, 기본 60(1~600) |
+| FastAPI 서버 | `TEACHER_DAILY_REQUEST_LIMIT` | 프로세스 전체 UTC 일일 요청 상한, 기본 1,000(1~100,000) |
 | 별도 teacher FastAPI | `LINGO_SERVICE_MODE=teacher-only` | coach/deep scorer preload를 건너뛰고 `/health`를 teacher 기준으로 응답 |
 
 정적 HTML에는 배포 과정에서 `window.LINGO_CONFIG = { edgeEndpoint, apiKey }` 또는 동등한
@@ -48,15 +49,21 @@ meta 설정을 주입한다. service role key는 브라우저에 넣지 않는�
 connect/read/write phase timeout이다. 전체 wall time은 더 길 수 있으므로 바깥 hard timeout을 더
 크게 둔다.
 
-공개 배포에서는 `TEACHER_API_TOKEN`을 반드시 설정하고, Supabase/API gateway에서 사용자별
-호출 제한·일일 예산도 별도로 건다. 서버의 `TEACHER_MAX_CONCURRENCY`는 순간 부하와 threadpool
-고갈을 막지만 누적 API 비용 한도는 아니다. 이번 작업에서는 공개 origin이나 유료 RunPod를
-생성하지 않았다.
+권장 공개 배포는 `TEACHER_API_TOKEN`을 FastAPI와 Supabase Edge에 동일하게 설정하고,
+브라우저가 Edge를 통해서만 Luna를 호출하게 하는 방식이다. 직접 RunPod UI를 제한된 공개
+테스트에 사용하는 경우에는 토큰을 브라우저에 넣지 말고, FastAPI의
+`TEACHER_RATE_LIMIT_PER_MINUTE`와 `TEACHER_DAILY_REQUEST_LIMIT`을 낮게 설정한다. 한도를 넘은
+요청은 HTTP 오류로 필기를 막지 않고 잠긴 deterministic fallback을 반환한다.
+
+이 두 카운터는 원시 IP를 저장하지 않고 프로세스 메모리에만 있으며, UTC 날짜가 바뀌거나
+프로세스가 재시작되면 초기화된다. 여러 worker/Pod에 걸친 강한 비용 상한이 필요한 운영 환경은
+API gateway나 공유 저장소 기반 quota를 추가해야 한다. `TEACHER_MAX_CONCURRENCY`는 별도로 순간
+부하와 threadpool 고갈을 제한한다.
 
 ## RunPod 켜기 / 끄기
 
-현재 계정에는 기존 `lingo-scorer` Pod가 남아 있지 않으므로 아래 절차는 새 Pod를 만든 뒤 새 ID와
-주소를 설정한 경우에만 적용된다. Stop/볼륨 과금은 선택한 GPU와 현재 RunPod 요금을 확인한다.
+아래 절차의 실제 Pod ID와 주소는 배포 시 RunPod 콘솔/API에서 확인한다. Stop/볼륨 과금은 선택한
+GPU와 현재 RunPod 요금을 확인한다.
 
 - **Windows 자동 실행(권장)**: `run_lingo.bat` 더블클릭. Pod를 켜고 서버가
   준비될 때까지 기다린다. 사용을 마친 뒤 Enter/Ctrl+C를 누르거나 창을

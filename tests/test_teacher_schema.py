@@ -374,3 +374,113 @@ def test_valid_teacher_concurrency_is_configurable(monkeypatch):
     monkeypatch.setenv("TEACHER_MAX_CONCURRENCY", "7")
 
     assert server._configured_teacher_concurrency() == 7
+
+
+@pytest.mark.parametrize(
+    ("name", "configured", "expected"),
+    [
+        ("TEACHER_RATE_LIMIT_PER_MINUTE", "7", 7),
+        ("TEACHER_DAILY_REQUEST_LIMIT", "321", 321),
+    ],
+)
+def test_teacher_public_budget_is_configurable(
+    monkeypatch,
+    name,
+    configured,
+    expected,
+):
+    monkeypatch.setenv(name, configured)
+
+    getter = (
+        server._configured_teacher_rate_limit
+        if name == "TEACHER_RATE_LIMIT_PER_MINUTE"
+        else server._configured_teacher_daily_limit
+    )
+    assert getter() == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "configured", "expected"),
+    [
+        (
+            "TEACHER_RATE_LIMIT_PER_MINUTE",
+            "0",
+            server.DEFAULT_TEACHER_RATE_LIMIT_PER_MINUTE,
+        ),
+        (
+            "TEACHER_DAILY_REQUEST_LIMIT",
+            "invalid",
+            server.DEFAULT_TEACHER_DAILY_REQUEST_LIMIT,
+        ),
+    ],
+)
+def test_invalid_teacher_public_budget_uses_safe_default(
+    monkeypatch,
+    name,
+    configured,
+    expected,
+):
+    monkeypatch.setenv(name, configured)
+
+    getter = (
+        server._configured_teacher_rate_limit
+        if name == "TEACHER_RATE_LIMIT_PER_MINUTE"
+        else server._configured_teacher_daily_limit
+    )
+    assert getter() == expected
+
+
+@pytest.mark.parametrize(
+    ("budget", "expected_reason"),
+    [
+        (server.TeacherRequestBudget(per_minute=1, daily_limit=10), "rate_limited"),
+        (
+            server.TeacherRequestBudget(per_minute=10, daily_limit=1),
+            "daily_budget_exceeded",
+        ),
+    ],
+)
+def test_teacher_public_limits_return_locked_fallback_without_provider_call(
+    monkeypatch,
+    budget,
+    expected_reason,
+):
+    monkeypatch.delenv("TEACHER_API_TOKEN", raising=False)
+    monkeypatch.setattr(server, "_teacher_request_budget", budget)
+    calls = 0
+
+    class FakeRenderer:
+        def render(self, received, *, purpose):
+            nonlocal calls
+            calls += 1
+            return TeacherFeedbackEnvelope(
+                feedback=deterministic_fallback(received, purpose=purpose),
+                source="fallback",
+                model=None,
+                fallback_reason="api_error",
+                latency_ms=0.1,
+                cached=False,
+                usage=None,
+            )
+
+    monkeypatch.setattr(server, "get_teacher_renderer", lambda: FakeRenderer())
+    client = TestClient(server.app)
+
+    headers = {"X-Forwarded-For": "203.0.113.10"}
+    first = client.post(
+        "/coach/verbalize",
+        json=teacher_payload(),
+        headers=headers,
+    )
+    second = client.post(
+        "/coach/verbalize",
+        json=teacher_payload(),
+        headers=headers,
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["source"] == "fallback"
+    assert second.json()["fallback_reason"] == expected_reason
+    assert second.json()["feedback"]["decision_id"] == "decision-1"
+    assert calls == 1
