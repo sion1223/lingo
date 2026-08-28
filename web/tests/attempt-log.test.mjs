@@ -6,6 +6,7 @@ import {
   buildAttemptPayload,
   createStrokeResult,
   markLastStrokeUndone,
+  shouldAutoRetryStroke,
 } from "../attempt-log.js";
 
 const richStroke = [
@@ -73,4 +74,24 @@ test("undone strokes remain in append-only history and server refinement is reco
   assert.equal(markLastStrokeUndone(history, 0), true);
   assert.equal(history[0].undone, true);
   assert.deepEqual(history[0].stroke, richStroke);
+});
+
+test("only high-confidence major retry diagnoses auto-remove the visible stroke", () => {
+  const severe = diagnosis({
+    accepted: false,
+    severity: "major",
+    intervention: "pause_and_retry",
+    primaryCue: { code: "PATH_DEVIATION", confidence: 0.9 },
+  });
+  assert.equal(shouldAutoRetryStroke(severe), true);
+  assert.equal(shouldAutoRetryStroke({
+    ...severe,
+    primaryCue: { ...severe.primaryCue, confidence: 0.81 },
+  }), false);
+  assert.equal(shouldAutoRetryStroke({
+    ...severe,
+    accepted: true,
+    severity: "minor",
+    intervention: "nudge",
+  }), false);
 });

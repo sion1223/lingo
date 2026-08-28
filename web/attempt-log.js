@@ -1,6 +1,7 @@
 import { clamp } from "./coach/metrics.js";
 
 export const ATTEMPT_CLIENT_VERSION = "web-v2";
+export const AUTO_RETRY_MIN_CONFIDENCE = 0.82;
 
 export function cloneStroke(stroke) {
   return stroke.map((point) => (
@@ -48,6 +49,18 @@ export function markLastStrokeUndone(history, strokeIndex) {
   if (!result) return false;
   result.undone = true;
   return true;
+}
+
+export function shouldAutoRetryStroke(diagnosis) {
+  const confidence = diagnosis?.primaryCue?.confidence
+    ?? diagnosis?.matchConfidence
+    ?? 0;
+  return Boolean(
+    diagnosis?.accepted === false
+    && diagnosis?.severity === "major"
+    && diagnosis?.intervention === "pause_and_retry"
+    && confidence >= AUTO_RETRY_MIN_CONFIDENCE
+  );
 }
 
 export function buildAttemptPayload({

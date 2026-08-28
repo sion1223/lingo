@@ -4,6 +4,7 @@ import {
   buildAttemptPayload,
   createStrokeResult,
   markLastStrokeUndone,
+  shouldAutoRetryStroke,
 } from "./attempt-log.js";
 import { CharacterPickerModel, splitCharacters } from "./character-picker.js";
 import { BUILTIN_TEMPLATES, getBuiltinTemplate } from "./coach/builtin-templates.js";
@@ -24,10 +25,15 @@ import {
   normalizeTeacherEnvelope,
   tryBuildTeacherFeedbackRequest,
 } from "./coach/teacher-feedback.js";
+import {
+  buildLocalAttemptRecord,
+  LocalAttemptStore,
+} from "./local-attempt-store.js";
 
 const TEACHER_REQUEST_TIMEOUT_MS = 28_000;
 
 const api = new ApiClient();
+const localAttemptStore = new LocalAttemptStore();
 const elements = {
   canvas: document.getElementById("cv"),
   coachCanvas: document.getElementById("coach-cv"),
@@ -52,6 +58,9 @@ const elements = {
   pickerGrid: document.getElementById("picker-grid"),
   pickerInfo: document.getElementById("picker-info"),
   pickerSearch: document.getElementById("picker-search"),
+  localHistoryCount: document.getElementById("local-history-count"),
+  localHistoryList: document.getElementById("local-history-list"),
+  localHistoryStatus: document.getElementById("local-history-status"),
 };
 
 const inkContext = elements.canvas.getContext("2d");
@@ -103,6 +112,8 @@ let attemptId = identity("attempt");
 let attemptStartedAt = new Date().toISOString();
 let attemptStrokeResults = [];
 let attemptRecordedReason = null;
+let localHistoryRefreshVersion = 0;
+let localStoreWarningShown = false;
 
 function escapeHtml(value) {
   return String(value)
@@ -111,6 +122,129 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function localAttemptRecord({
+  endedReason = null,
+  endedAt = null,
+  finalScore = null,
+} = {}) {
+  const character = templateCharacter || currentCharacter();
+  if (
+    !character
+    || (strokes.length === 0 && attemptStrokeResults.length === 0)
+  ) {
+    return null;
+  }
+  const savedAt = endedAt || new Date().toISOString();
+  return buildLocalAttemptRecord({
+    sessionId,
+    attemptId,
+    attemptRevision: coach.lifecycle.revision,
+    character,
+    mode: stage === 1 ? "trace" : "recall",
+    startedAt: attemptStartedAt,
+    savedAt,
+    strokes,
+    strokeResults: attemptStrokeResults,
+    endedReason,
+    endedAt,
+    finalScore,
+  });
+}
+
+function formatLocalAttemptTime(value) {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) return "저장 시간 확인 불가";
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
+}
+
+function renderLocalHistory(count, records) {
+  elements.localHistoryCount.textContent = String(count);
+  elements.localHistoryList.replaceChildren();
+  if (records.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "local-history-empty";
+    empty.textContent = "아직 이 기기에 저장된 필기 시도가 없습니다.";
+    elements.localHistoryList.appendChild(empty);
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  for (const record of records) {
+    const item = document.createElement("div");
+    item.className = "local-history-item";
+    const character = document.createElement("span");
+    character.className = "local-history-char";
+    character.textContent = record.char || "?";
+    const details = document.createElement("span");
+    details.className = "local-history-meta";
+    const attempts = Array.isArray(record.stroke_results)
+      ? record.stroke_results.length
+      : record.strokes?.length || 0;
+    const removed = Array.isArray(record.stroke_results)
+      ? record.stroke_results.filter((result) => result.undone).length
+      : 0;
+    const score = Number.isFinite(record.final_score)
+      ? ` · ${record.final_score}점`
+      : "";
+    const removedLabel = removed > 0 ? ` · 다시 쓴 획 ${removed}` : "";
+    const state = record.status === "finished" ? "완료" : "작성 중";
+    details.textContent = `${state} · 입력 ${attempts}획${removedLabel}${score}`
+      + ` · ${formatLocalAttemptTime(record.updated_at)}`;
+    item.append(character, details);
+    fragment.appendChild(item);
+  }
+  elements.localHistoryList.appendChild(fragment);
+}
+
+async function refreshLocalHistory() {
+  const refreshVersion = ++localHistoryRefreshVersion;
+  if (!localAttemptStore.available) {
+    elements.localHistoryCount.textContent = "-";
+    elements.localHistoryStatus.textContent = "이 브라우저에서는 로컬 저장을 사용할 수 없습니다.";
+    return;
+  }
+  try {
+    const [count, records] = await Promise.all([
+      localAttemptStore.count(),
+      localAttemptStore.listRecent(8),
+    ]);
+    if (refreshVersion !== localHistoryRefreshVersion) return;
+    renderLocalHistory(count, records);
+    elements.localHistoryStatus.textContent = "획 좌표와 순서를 이 브라우저에 자동 저장합니다.";
+  } catch (error) {
+    if (refreshVersion !== localHistoryRefreshVersion) return;
+    elements.localHistoryCount.textContent = "-";
+    elements.localHistoryStatus.textContent = "로컬 필기 기록을 불러오지 못했습니다.";
+    if (!localStoreWarningShown) {
+      localStoreWarningShown = true;
+      console.warn("local attempt history unavailable", error);
+    }
+  }
+}
+
+function saveLocalAttempt(record) {
+  if (!record) return Promise.resolve(false);
+  return localAttemptStore.save(record).then(() => {
+    void refreshLocalHistory();
+    return true;
+  }).catch((error) => {
+    elements.localHistoryStatus.textContent = "로컬 저장에 실패했습니다. 브라우저 저장 권한을 확인해 주세요.";
+    if (!localStoreWarningShown) {
+      localStoreWarningShown = true;
+      console.warn("local attempt save unavailable", error);
+    }
+    return false;
+  });
+}
+
+function saveCurrentAttemptLocally(options = {}) {
+  return saveLocalAttempt(localAttemptRecord(options));
 }
 
 function setStatus(tone, text) {
@@ -338,9 +472,20 @@ function scheduleDrawingFrame() {
   });
 }
 
-function renderDiagnosis(diagnosis) {
+function renderDiagnosis(diagnosis, { autoRetry = false } = {}) {
   coachOverlay.renderResult(diagnosis);
   if (!diagnosis) return;
+  if (autoRetry) {
+    const guidance = diagnosis.primaryCue?.text
+      ? `${diagnosis.primaryCue.text} `
+      : "";
+    setCoachMessage(
+      `${guidance}방금 획은 지웠어요. 같은 획을 다시 써 보세요.`,
+      "retry",
+      "↶",
+    );
+    return;
+  }
   if (!diagnosis.primaryCue) {
     if (diagnosis.nextAction.type === "complete") {
       setCoachMessage("글자를 완성했어요. 원하면 최종 채점을 확인해 보세요.", "success", "✓");
@@ -377,6 +522,8 @@ async function recordCurrentAttempt(
     return false;
   }
   attemptRecordedReason = endedReason;
+  const endedAt = new Date().toISOString();
+  void saveCurrentAttemptLocally({ endedReason, endedAt, finalScore });
   const payload = buildAttemptPayload({
     sessionId,
     attemptId,
@@ -385,7 +532,7 @@ async function recordCurrentAttempt(
     mode: stage === 1 ? "trace" : "recall",
     endedReason,
     startedAt: attemptStartedAt,
-    endedAt: new Date().toISOString(),
+    endedAt,
     strokes,
     strokeResults: attemptStrokeResults,
     finalScore,
@@ -566,8 +713,24 @@ async function requestServerRefinement({
       && coach.applyServerRefinement(token, localDiagnosis, serverDiagnosis)
     ) {
       applyServerStrokeResult(attemptStrokeResults, historySequence, serverDiagnosis);
-      renderDiagnosis(serverDiagnosis);
+      const history = attemptStrokeResults.find(
+        (entry) => entry.sequence === historySequence,
+      );
+      const autoRetry = Boolean(
+        shouldAutoRetryStroke(serverDiagnosis)
+        && history
+        && !history.undone
+        && history.stroke_index === strokes.length - 1
+      );
+      if (autoRetry) {
+        markLastStrokeUndone(attemptStrokeResults, history.stroke_index);
+        strokes.pop();
+        coach.undoLast();
+        redrawInk();
+      }
+      renderDiagnosis(serverDiagnosis, { autoRetry });
       prepareTeacherExplanation(serverDiagnosis, { countAttempt: false });
+      void saveCurrentAttemptLocally();
     }
   } catch (error) {
     if (error.name !== "AbortError") {
@@ -633,10 +796,17 @@ function endStroke(event) {
     diagnosis,
   });
   attemptStrokeResults.push(history);
+  const autoRetry = shouldAutoRetryStroke(diagnosis);
+  if (autoRetry) {
+    markLastStrokeUndone(attemptStrokeResults, history.stroke_index);
+    strokes.pop();
+    coach.undoLast();
+  }
   redrawInk();
-  renderDiagnosis(diagnosis);
+  renderDiagnosis(diagnosis, { autoRetry });
   prepareTeacherExplanation(diagnosis);
-  if (diagnosis) {
+  void saveCurrentAttemptLocally();
+  if (diagnosis && !autoRetry) {
     void requestServerRefinement({
       localDiagnosis: diagnosis,
       acceptedStrokes,
@@ -662,6 +832,7 @@ document.getElementById("undo").addEventListener("click", () => {
   coachOverlay.clear();
   setCoachMessage("마지막 획을 지웠어요. 같은 획부터 다시 써 보세요.", "nudge", "↶");
   redrawInk();
+  void saveCurrentAttemptLocally();
 });
 
 document.getElementById("clear").addEventListener("click", () => {
@@ -1031,6 +1202,7 @@ window.addEventListener("pagehide", () => {
 
 setStage(1);
 configureCanvases();
+void refreshLocalHistory();
 loadTemplate();
 checkHealth();
 setInterval(checkHealth, 20_000);

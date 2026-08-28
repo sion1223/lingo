@@ -62,9 +62,17 @@
   <div id="result"></div>
   <details id="data-note">
     <summary>필기 기록 안내</summary>
-    연습이 끝날 때 익명 세션 ID와 획의 순서·좌표·시간·필압·기울기 및 교정 결과를
-    한 묶음으로 서버에 저장합니다. 개인 식별 정보는 수집하지 않으며, 현재 기록은
-    학습 동의가 없는 상태로 저장되어 별도 동의 전에는 모델 학습에 사용하지 않습니다.
+    쓰기를 마친 각 획은 순서·좌표·시간·필압·기울기 및 교정 결과와 함께 이 브라우저에
+    자동 저장됩니다. 연습이 끝나면 같은 필기 정보를 익명 세션 ID와 함께 서버에도
+    저장합니다. 개인 식별 정보는 수집하지 않으며, 현재 기록은 학습 동의가 없는 상태로
+    저장되어 별도 동의 전에는 모델 학습에 사용하지 않습니다.
+  </details>
+  <details id="local-history">
+    <summary>
+      이 기기에 저장된 글씨 시도 <span id="local-history-count">0</span>개
+    </summary>
+    <div id="local-history-status">로컬 필기 기록을 불러오는 중…</div>
+    <div id="local-history-list" aria-live="polite"></div>
   </details>
 
   <div id="picker" role="dialog" aria-modal="true" aria-label="문자 선택">
