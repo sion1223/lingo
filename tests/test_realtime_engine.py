@@ -103,6 +103,35 @@ def test_geometry_only_engine_accepts_same_shape_with_parallel_translation():
     assert response.intervention == "nudge"
 
 
+def test_recall_engine_accepts_same_form_at_any_position_and_scale_without_a_nudge():
+    strokes = template_strokes()
+    moved_and_scaled = strokes[0] * 0.55 + np.array([0.25, 0.48])
+    engine = FastCoachEngine(lambda _char: strokes)
+
+    response = engine.coach(request(moved_and_scaled.tolist(), mode="recall"))
+
+    assert response.metrics.form_error == pytest.approx(0.0, abs=1e-8)
+    assert response.primary_cue is None
+    assert response.accepted is True
+    assert response.next_action.type == "draw_next"
+    assert response.overlay.next_start is None
+
+
+def test_recall_engine_retries_a_large_form_change_but_not_its_start_position():
+    strokes = template_strokes()[:1]
+    different_form = np.asarray(
+        [[0.5, 0.1], [0.5, 0.5], [0.5, 0.9]],
+        dtype=np.float64,
+    )
+    engine = FastCoachEngine(lambda _char: strokes)
+
+    response = engine.coach(request(different_form.tolist(), mode="recall"))
+
+    assert response.primary_cue.code == "PATH_DEVIATION"
+    assert response.accepted is False
+    assert response.intervention == "pause_and_retry"
+
+
 def test_lightweight_model_is_called_once_and_conflict_stays_a_nudge():
     strokes = template_strokes()
     model = FakeStrokeModel(reverse_logit=5.0)

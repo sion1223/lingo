@@ -123,7 +123,7 @@ def gradient_directions(model, user, template):
     return g.reshape(S, P, 2)
 
 
-def analyze(model, template, raw_user_strokes, top_k=3):
+def analyze(model, template, raw_user_strokes, top_k=3, mode="trace"):
     """종합 분석. 반환 dict:
       score        0~100 전체 점수
       strokes      획별 진단 리스트 (q, 플래그, 오차, 반사실 gain, 메시지)
@@ -145,6 +145,7 @@ def analyze(model, template, raw_user_strokes, top_k=3):
         missing=missing,
         score_once=lambda fixed, target: _model_score(model, fixed, target),
         top_k=top_k,
+        mode=mode,
     )
     report['grad'] = grad
     return report

@@ -239,11 +239,28 @@ export function computeStrokeMetrics(userPoints, templatePoints, options = {}) {
   const centeredTemplate = template.map(([x, y]) => [x - templateCenter[0], y - templateCenter[1]]);
   const userBox = boundingBox(user);
   const templateBox = boundingBox(template);
+  const normalizedUser = centeredUser.map(([x, y]) => [
+    x / Math.max(userBox.diagonal, EPSILON),
+    y / Math.max(userBox.diagonal, EPSILON),
+  ]);
+  const normalizedTemplate = centeredTemplate.map(([x, y]) => [
+    x / Math.max(templateBox.diagonal, EPSILON),
+    y / Math.max(templateBox.diagonal, EPSILON),
+  ]);
+  const formAlignment = bandedDtw(normalizedUser, normalizedTemplate, options);
+  const fittedScale = userBox.diagonal >= EPSILON && templateBox.diagonal >= EPSILON
+    ? userBox.diagonal / templateBox.diagonal
+    : 1;
+  const fittedTemplate = centeredTemplate.map(([x, y]) => [
+    userBox.center[0] + x * fittedScale,
+    userBox.center[1] + y * fittedScale,
+  ]);
   const userCurvature = curvature(user);
   const templateCurvature = curvature(template);
 
   let hotspot = { difference: 0, userIndex: 0, templateIndex: 0 };
   let maximumAlignedError = { distance: 0, pathIndex: 0 };
+  let maximumFormError = { distance: 0, pathIndex: 0 };
   forward.path.forEach(([userIndex, templateIndex], pathIndex) => {
     const difference = Math.abs(userCurvature[userIndex] - templateCurvature[templateIndex]);
     if (difference > hotspot.difference) {
@@ -254,10 +271,25 @@ export function computeStrokeMetrics(userPoints, templatePoints, options = {}) {
       maximumAlignedError = { distance: alignedError, pathIndex };
     }
   });
+  formAlignment.path.forEach(([userIndex, templateIndex], pathIndex) => {
+    const alignedError = distance(
+      normalizedUser[userIndex],
+      normalizedTemplate[templateIndex],
+    );
+    if (alignedError > maximumFormError.distance) {
+      maximumFormError = { distance: alignedError, pathIndex };
+    }
+  });
 
   const segmentStart = Math.max(0, maximumAlignedError.pathIndex - 2);
   const segmentEnd = Math.min(forward.path.length, maximumAlignedError.pathIndex + 3);
   const problemPath = forward.path.slice(segmentStart, segmentEnd);
+  const formSegmentStart = Math.max(0, maximumFormError.pathIndex - 2);
+  const formSegmentEnd = Math.min(
+    formAlignment.path.length,
+    maximumFormError.pathIndex + 3,
+  );
+  const formProblemPath = formAlignment.path.slice(formSegmentStart, formSegmentEnd);
   const direction = directionCosine(user, template);
   const pathError = alignedMeanDistance(user, template, forward.path);
   const reversePathError = reversed.distance;
@@ -267,6 +299,7 @@ export function computeStrokeMetrics(userPoints, templatePoints, options = {}) {
     endError: distance(user.at(-1), template.at(-1)),
     pathError,
     shapeError: alignedMeanDistance(centeredUser, centeredTemplate, forward.path),
+    formError: formAlignment.distance,
     directionCosine: direction,
     // Fixed-density paths keep high-rate pen jitter from becoming fake length.
     lengthRatio: strokeArcLength(user) / Math.max(strokeArcLength(template), EPSILON),
@@ -294,6 +327,10 @@ export function computeStrokeMetrics(userPoints, templatePoints, options = {}) {
     },
     problemSegment: problemPath.map(([userIndex]) => user[userIndex]),
     targetSegment: problemPath.map(([, templateIndex]) => template[templateIndex]),
+    formProblemSegment: formProblemPath.map(([userIndex]) => user[userIndex]),
+    formTargetSegment: formProblemPath.map(
+      ([, templateIndex]) => fittedTemplate[templateIndex],
+    ),
     alignedUser: user,
     alignedTemplate: template,
   };

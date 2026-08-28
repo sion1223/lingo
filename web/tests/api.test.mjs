@@ -27,6 +27,35 @@ test("direct API mode posts the complete coach contract to /coach/stroke", async
   }
 });
 
+test("direct score requests preserve the selected grading mode", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured;
+  globalThis.fetch = async (url, init) => {
+    captured = { url, init };
+    return new Response('{"score":90}', {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+  try {
+    const client = new ApiClient({ apiBaseUrl: "https://api.example.test/" });
+    await client.request("score", {
+      char: "永",
+      strokes: [[[0.2, 0.2], [0.8, 0.8]]],
+      mode: "recall",
+    });
+
+    assert.equal(captured.url, "https://api.example.test/score");
+    assert.deepEqual(JSON.parse(captured.init.body), {
+      char: "永",
+      strokes: [[[0.2, 0.2], [0.8, 0.8]]],
+      mode: "recall",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("direct API mode routes teacher verbalize and summary separately", async () => {
   const originalFetch = globalThis.fetch;
   const captured = [];

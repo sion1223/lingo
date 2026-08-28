@@ -148,6 +148,47 @@ test("dense mobile pen sampling does not turn a matching stroke into TOO_LONG", 
   assert.equal(result.nextAction.type, "complete");
 });
 
+test("recall mode accepts the same form at any start position and uniform size", () => {
+  const template = [[[0.1, 0.2], [0.5, 0.3], [0.9, 0.2]]];
+  const movedAndScaled = template[0].map(([x, y]) => [
+    0.24 + x * 0.55,
+    0.52 + y * 0.55,
+  ]);
+
+  const trace = analyzeCompletedStroke({
+    stroke: movedAndScaled,
+    templateStrokes: template,
+    mode: "trace",
+  });
+  const recall = analyzeCompletedStroke({
+    stroke: movedAndScaled,
+    templateStrokes: template,
+    mode: "recall",
+  });
+
+  assert.ok(trace.primaryCue);
+  assert.ok(recall.metrics.formError < 1e-8);
+  assert.equal(recall.primaryCue, null);
+  assert.equal(recall.accepted, true);
+  assert.equal(recall.overlay.nextStart, null);
+});
+
+test("recall mode stays quiet while drawing and rejects only a major form change", () => {
+  const template = [[[0.1, 0.5], [0.5, 0.5], [0.9, 0.5]]];
+  const differentForm = [[0.5, 0.1], [0.5, 0.5], [0.5, 0.9]];
+
+  assert.equal(analyzePartialStroke(differentForm, template, 0, { mode: "recall" }), null);
+  const result = analyzeCompletedStroke({
+    stroke: differentForm,
+    templateStrokes: template,
+    mode: "recall",
+  });
+
+  assert.equal(result.primaryCue?.code, "PATH_DEVIATION");
+  assert.equal(result.accepted, false);
+  assert.equal(result.intervention, "pause_and_retry");
+});
+
 test("invalid and degenerate strokes fail safely", () => {
   const fixture = fixtures.characters.日;
   for (const stroke of [

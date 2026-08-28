@@ -175,7 +175,7 @@ def _score_once(model, user, template):
     return model([uimg], gw, [timg], smask)
 
 
-def analyze_chandra(model, template, raw_user_strokes, top_k=3):
+def analyze_chandra(model, template, raw_user_strokes, top_k=3, mode="trace"):
     """Chandra 채점 + 교정 제안. feedback.analyze 와 동일한 리포트 형식.
     (렌더링이 비미분이라 그래디언트 대신 반사실 분석 + 기하 이동벡터 사용)"""
     from .feedback import prepare_user_strokes, match_strokes
@@ -192,4 +192,5 @@ def analyze_chandra(model, template, raw_user_strokes, top_k=3):
         missing=missing,
         score_once=lambda fixed, target: _score_once(model, fixed, target),
         top_k=top_k,
+        mode=mode,
     )

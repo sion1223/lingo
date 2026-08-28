@@ -112,6 +112,7 @@ class CoachMetrics(BaseModel):
     end_error: float = Field(ge=0)
     path_error: float = Field(ge=0)
     shape_error: float = Field(ge=0)
+    form_error: float = Field(ge=0)
     direction_cosine: float = Field(ge=-1, le=1)
     length_ratio: float = Field(ge=0)
     bbox_shift: Vector

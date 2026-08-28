@@ -166,11 +166,12 @@ export class WarningHysteresis {
 }
 
 export class LocalCoachController {
-  constructor({ templateStrokes = null, onStateChange } = {}) {
+  constructor({ templateStrokes = null, mode = "trace", onStateChange } = {}) {
     this.lifecycle = new AttemptLifecycle();
     this.machine = new TutorStateMachine(onStateChange);
     this.hysteresis = new WarningHysteresis();
     this.templateStrokes = templateStrokes;
+    this.mode = mode === "recall" ? "recall" : "trace";
     this.expectedTemplateIndex = 0;
     this.results = [];
     this.machine.ready();
@@ -189,6 +190,11 @@ export class LocalCoachController {
     this.templateStrokes = templateStrokes;
   }
 
+  setMode(mode) {
+    this.mode = mode === "recall" ? "recall" : "trace";
+    this.hysteresis.reset();
+  }
+
   beginStroke() {
     this.hysteresis.reset();
     return this.machine.beginStroke();
@@ -200,6 +206,7 @@ export class LocalCoachController {
       stroke,
       this.templateStrokes,
       this.expectedTemplateIndex,
+      { mode: this.mode },
     );
     return this.hysteresis.update(diagnosis, now);
   }
@@ -210,6 +217,7 @@ export class LocalCoachController {
       stroke,
       templateStrokes: this.templateStrokes,
       expectedTemplateIndex: this.expectedTemplateIndex,
+      mode: this.mode,
     });
     if (diagnosis.advancesPrefix) this.expectedTemplateIndex += 1;
     this.results.push(diagnosis);

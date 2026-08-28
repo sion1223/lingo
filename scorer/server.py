@@ -16,6 +16,7 @@ from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -437,6 +438,7 @@ async def request_validation_error(_request, exc):
 class ScoreRequest(BaseModel):
     char: str
     strokes: list[list[tuple[float, float]]]
+    mode: Literal['trace', 'recall'] = 'trace'
 
 
 def _sanitize(report):
@@ -608,9 +610,14 @@ def score(req: ScoreRequest):
         raise HTTPException(400, '좌표는 유한한 숫자여야 합니다')
     tmpl = load_char(KANJI_DIR, ch)
     t0 = time.time()
-    report = analyze_chandra(model, tmpl, strokes)
+    report = (
+        analyze_chandra(model, tmpl, strokes, mode='recall')
+        if req.mode == 'recall'
+        else analyze_chandra(model, tmpl, strokes)
+    )
     out = _sanitize(report)
     out['char'] = ch
+    out['mode'] = req.mode
     out['template'] = [s.tolist() for s in tmpl]
     out['elapsed'] = round(time.time() - t0, 2)
     return out

@@ -395,7 +395,7 @@ Deno.serve(async (req) => {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ char: body.char, strokes: body.strokes }),
+          body: JSON.stringify({ char: body.char, strokes: body.strokes, mode: body.mode }),
         },
         150000,
       );

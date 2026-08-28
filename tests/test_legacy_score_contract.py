@@ -93,3 +93,29 @@ def test_score_rejects_non_finite_legacy_coordinates(monkeypatch):
     assert response.status_code == 400
     assert response.json()["detail"] == "좌표는 유한한 숫자여야 합니다"
 
+
+def test_score_passes_optional_recall_mode_to_the_shape_only_policy(monkeypatch):
+    captured: dict[str, object] = {}
+    template = [np.asarray([[0.2, 0.2], [0.8, 0.8]], dtype=np.float64)]
+    monkeypatch.setattr(server, "get_model", lambda: object())
+    monkeypatch.setattr(server, "char_to_file", lambda _directory, _char: "fixture.svg")
+    monkeypatch.setattr(server.os.path, "exists", lambda _path: True)
+    monkeypatch.setattr(server, "load_char", lambda _directory, _char: template)
+
+    def analyze(_model, _template, raw_strokes, *, mode):
+        captured["mode"] = mode
+        return _fake_report(raw_strokes)
+
+    monkeypatch.setattr(server, "analyze_chandra", analyze)
+    response = TestClient(server.app).post(
+        "/score",
+        json={
+            "char": "永",
+            "mode": "recall",
+            "strokes": [[[0.2, 0.2], [0.8, 0.8]]],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["mode"] == "recall"
+    assert response.json()["mode"] == "recall"

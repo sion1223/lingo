@@ -80,7 +80,11 @@ export class ApiClient {
         ...init,
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ char: payload.char, strokes: payload.strokes }),
+        body: JSON.stringify({
+          char: payload.char,
+          strokes: payload.strokes,
+          mode: payload.mode,
+        }),
       };
     } else if (action === "coach") {
       url = joinUrl(base, "/coach/stroke");

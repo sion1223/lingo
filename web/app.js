@@ -13,6 +13,7 @@ import { toLegacyStrokes } from "./coach/local-matcher.js";
 import { clamp, distance, toXY } from "./coach/metrics.js";
 import { CoachOverlay } from "./coach/overlay.js";
 import { bindStrokeEndEvents } from "./coach/pointer-boundary.js";
+import { fitTemplateToWriting } from "./coach/template-fit.js";
 import {
   buildCoachPayload,
   chooseHigherConfidence,
@@ -347,8 +348,11 @@ function prepareTeacherExplanation(diagnosis, { countAttempt = true } = {}) {
 function setStage(nextStage) {
   stage = nextStage;
   revealCount = 0;
+  const mode = stage === 1 ? "trace" : "recall";
+  coach.setMode(mode);
+  document.body.dataset.practiceMode = mode;
   elements.stageBadge.textContent = (
-    stage === 1 ? "1단계: 궤적 따라쓰기" : "2단계: 안 보고 쓰기"
+    stage === 1 ? "1단계: 궤적 따라쓰기" : "2단계: 위치 자유 · 모양 쓰기"
   );
   elements.hint.hidden = stage !== 2;
 }
@@ -389,6 +393,22 @@ function qualityColor(quality) {
   return "#b42318";
 }
 
+function completedRecallWriting() {
+  return Boolean(
+    stage === 2
+    && template?.length
+    && strokes.length > 0
+    && coach.expectedTemplateIndex >= template.length
+    && !currentStroke
+  );
+}
+
+function drawCompletedRecallReference(referenceTemplate) {
+  for (const referenceStroke of referenceTemplate) {
+    drawStroke(referenceStroke, "rgba(23, 92, 211, 0.72)", 3, [8, 6]);
+  }
+}
+
 function redrawInk() {
   if (!canvasSize) return;
   inkContext.clearRect(0, 0, canvasSize, canvasSize);
@@ -403,13 +423,16 @@ function redrawInk() {
   inkContext.stroke();
   inkContext.setLineDash([]);
 
-  if (template) {
+  const referenceTemplate = stage === 2 && template
+    ? fitTemplateToWriting(template, strokes)
+    : template;
+  if (referenceTemplate) {
     const visibleCount = stage === 1 ? template.length : Math.min(revealCount, template.length);
     for (let index = 0; index < visibleCount; index += 1) {
-      drawStroke(template[index], "#d8d3c8", 7);
+      drawStroke(referenceTemplate[index], "#d8d3c8", 7);
     }
     for (let index = 0; index < visibleCount; index += 1) {
-      const [x, y] = toXY(template[index][0]);
+      const [x, y] = toXY(referenceTemplate[index][0]);
       inkContext.fillStyle = "#766f63";
       inkContext.font = "12px sans-serif";
       inkContext.fillText(String(index + 1), x * canvasSize + 4, y * canvasSize - 4);
@@ -421,18 +444,20 @@ function redrawInk() {
       const entry = lastReport.strokes?.[index];
       drawStroke(lastReport.user[index], qualityColor(entry?.q ?? 0.5), 5);
     }
-    if (lastReport.missing && template) {
+    if (lastReport.missing && referenceTemplate) {
       for (const missingIndex of lastReport.missing) {
-        if (template[missingIndex]) {
-          drawStroke(template[missingIndex], "#175cd3", 4, [8, 6]);
+        if (referenceTemplate[missingIndex]) {
+          drawStroke(referenceTemplate[missingIndex], "#175cd3", 4, [8, 6]);
         }
       }
     }
+    if (completedRecallWriting()) drawCompletedRecallReference(referenceTemplate);
     return;
   }
 
   for (const stroke of strokes) drawStroke(stroke, "#2b2925", 5);
   if (currentStroke) drawStroke(currentStroke, "#2b2925", 5);
+  if (completedRecallWriting()) drawCompletedRecallReference(referenceTemplate);
 }
 
 function richPoint(event) {
@@ -488,7 +513,13 @@ function renderDiagnosis(diagnosis, { autoRetry = false } = {}) {
   }
   if (!diagnosis.primaryCue) {
     if (diagnosis.nextAction.type === "complete") {
-      setCoachMessage("글자를 완성했어요. 원하면 최종 채점을 확인해 보세요.", "success", "✓");
+      setCoachMessage(
+        stage === 2
+          ? "글자를 완성했어요. 파란 점선은 쓴 위치와 크기에 맞춘 예시입니다."
+          : "글자를 완성했어요. 원하면 최종 채점을 확인해 보세요.",
+        "success",
+        "✓",
+      );
     } else {
       setCoachMessage(
         `좋아요. ${diagnosis.nextAction.templateIndex + 1}번 획을 이어서 써 보세요.`,
@@ -726,8 +757,8 @@ async function requestServerRefinement({
         markLastStrokeUndone(attemptStrokeResults, history.stroke_index);
         strokes.pop();
         coach.undoLast();
-        redrawInk();
       }
+      redrawInk();
       renderDiagnosis(serverDiagnosis, { autoRetry });
       prepareTeacherExplanation(serverDiagnosis, { countAttempt: false });
       void saveCurrentAttemptLocally();
@@ -1116,7 +1147,9 @@ function correctionLabel(correction) {
 
 function renderScoreReport(body) {
   const scoreDetails = body.shape_score != null && body.position_score != null
-    ? `형태 ${escapeHtml(body.shape_score)} · 위치 ${escapeHtml(body.position_score)}`
+    ? body.score_policy === "recall_shape_only_v1"
+      ? `모양 ${escapeHtml(body.shape_score)} · 위치 자유 모드`
+      : `형태 ${escapeHtml(body.shape_score)} · 위치 ${escapeHtml(body.position_score)}`
       + ` · AI ${escapeHtml(body.base_model_score)}`
     : `모델 점수 ${escapeHtml(body.base_model_score)}`;
   let html = `<div id="score-big">${escapeHtml(body.score)}점</div>`
@@ -1135,8 +1168,8 @@ function renderScoreReport(body) {
   }
   if (stage === 1) {
     setStage(2);
-    html += '<div class="msg"><b>2단계</b> — 이번엔 궤적 없이 기억해서 써 보세요. '
-      + '막히면 <b>한 획 보기</b> 버튼으로 하나씩 확인할 수 있습니다.</div>';
+    html += '<div class="msg"><b>2단계</b> — 원하는 위치와 크기에서 모양을 기억해 써 보세요. '
+      + '시작 위치는 채점하지 않으며, 막히면 <b>한 획 보기</b>로 확인할 수 있습니다.</div>';
   }
   elements.result.innerHTML = html;
 }
@@ -1160,7 +1193,11 @@ document.getElementById("go").addEventListener("click", async () => {
   try {
     const { status, body } = await api.request(
       "score",
-      { char: character, strokes: toLegacyStrokes(strokes) },
+      {
+        char: character,
+        strokes: toLegacyStrokes(strokes),
+        mode: stage === 1 ? "trace" : "recall",
+      },
       { signal: token.controller.signal },
     );
     if (!coach.lifecycle.isCurrent(token)) return;

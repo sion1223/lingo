@@ -23,6 +23,8 @@ export const DEFAULT_POLICY = Object.freeze({
   shortRetry: 0.48,
   longNudge: 1.34,
   longRetry: 1.72,
+  recallFormNudge: 0.08,
+  recallFormRetry: 0.20,
 });
 
 function confidence(value, nudge, retry) {
@@ -96,6 +98,34 @@ export function selectPrimaryCue(metrics, context = {}, thresholds = DEFAULT_POL
       anchor: { x: metrics.alignedUser[0][0], y: metrics.alignedUser[0][1] },
       vector: metrics.startVector,
     }));
+  }
+  if (context.mode === "recall") {
+    const formError = Number.isFinite(metrics.formError)
+      ? metrics.formError
+      : metrics.shapeError;
+    if (formError > thresholds.recallFormNudge) {
+      const problemAnchor = metrics.formProblemSegment?.at(
+        Math.floor((metrics.formProblemSegment?.length ?? 1) / 2),
+      );
+      cues.push(candidate({
+        code: ERROR_CODES.PATH_DEVIATION,
+        priority: 85,
+        confidence: confidence(
+          formError,
+          thresholds.recallFormNudge,
+          thresholds.recallFormRetry,
+        ),
+        major: formError >= thresholds.recallFormRetry,
+        text: "강조된 구간의 모양만 예시와 비슷하게 다듬어 보세요.",
+        anchor: problemAnchor
+          ? { x: problemAnchor[0], y: problemAnchor[1] }
+          : undefined,
+      }));
+    }
+    cues.sort((left, right) => (
+      right.priority * right.confidence - left.priority * left.confidence
+    ));
+    return cues[0] ?? null;
   }
   if (metrics.startError > thresholds.startNudge) {
     cues.push(candidate({

@@ -39,6 +39,20 @@ def test_metrics_separate_position_shape_direction_and_length():
     assert short_metrics.length_ratio == pytest.approx(0.5)
 
 
+def test_form_error_ignores_one_uniform_scale_and_translation():
+    template = np.asarray(
+        [[0.1, 0.2], [0.35, 0.1], [0.6, 0.28], [0.9, 0.2]],
+        dtype=np.float64,
+    )
+    moved_and_scaled = template * 0.55 + np.array([0.25, 0.48])
+
+    metrics = compute_stroke_metrics(moved_and_scaled, template)
+
+    assert metrics.start_error > 0.4
+    assert metrics.form_error == pytest.approx(0.0, abs=1e-8)
+    assert metrics.form_target_segment
+
+
 def test_dense_mobile_pen_sampling_does_not_inflate_stroke_length():
     template = line()
     samples = 141

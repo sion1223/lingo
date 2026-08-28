@@ -74,6 +74,30 @@ def test_final_score_rescues_correct_form_when_model_is_position_sensitive():
     assert report["score_policy"] == "shape_tolerant_v1"
 
 
+def test_recall_score_ignores_global_start_position_and_uniform_character_size():
+    template = normalize_strokes([
+        _line((0.1, 0.2), (0.8, 0.2)),
+        _line((0.8, 0.2), (0.8, 0.9)),
+    ])
+    moved_and_scaled = [stroke * 0.52 + np.array([0.34, 0.31]) for stroke in template]
+
+    report = analyze_chandra(
+        _SequencedFakeModel(first_score=0.25),
+        template,
+        moved_and_scaled,
+        mode="recall",
+    )
+
+    assert report["score"] >= 90.0
+    assert report["shape_score"] >= 99.0
+    assert report["score_policy"] == "recall_shape_only_v1"
+    assert report["score_components"]["position_weight"] == 0.0
+    assert all(
+        correction.get("error_code") != "POSITION_OFFSET"
+        for correction in report["corrections"]
+    )
+
+
 def test_well_formed_stroke_is_not_listed_as_a_correction_from_gain_alone():
     template = normalize_strokes([_line((0.1, 0.2), (0.8, 0.2))])
 

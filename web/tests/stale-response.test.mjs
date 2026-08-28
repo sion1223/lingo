@@ -65,6 +65,14 @@ test("state machine accepts a good stroke and undo restores the expected prefix"
   assert.equal(coach.machine.state, TUTOR_STATES.READY_TO_DRAW);
 });
 
+test("controller switches recall mode without carrying pointer-move corrections", () => {
+  const coach = new LocalCoachController({ templateStrokes: template });
+  coach.setMode("recall");
+  assert.equal(coach.mode, "recall");
+  assert.equal(coach.beginStroke(), true);
+  assert.equal(coach.analyzePartial([[0.4, 0.5], [0.6, 0.5]], 1000), null);
+});
+
 test("reset after a character change returns to a clean attempt", () => {
   const coach = new LocalCoachController({ templateStrokes: template });
   coach.beginStroke();

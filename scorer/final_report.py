@@ -18,13 +18,19 @@ import torch
 from .synth import stroke_errors
 
 SCORE_POLICY = "shape_tolerant_v1"
+RECALL_SCORE_POLICY = "recall_shape_only_v1"
 MODEL_WEIGHT = 0.22
 SHAPE_WEIGHT = 0.68
 POSITION_WEIGHT = 0.10
+RECALL_MODEL_WEIGHT = 0.10
+RECALL_SHAPE_WEIGHT = 0.90
+RECALL_POSITION_WEIGHT = 0.0
 SHAPE_ERROR_SCALE = 6.0
 POSITION_ERROR_SCALE = 2.0
 SHAPE_CORRECTION_THRESHOLD = 0.07
 POSITION_CORRECTION_THRESHOLD = 0.12
+RECALL_SHAPE_CORRECTION_THRESHOLD = 0.12
+RECALL_MAJOR_SHAPE_THRESHOLD = 0.22
 DIRECTION_PENALTY = 0.18
 ORDER_PENALTY = 0.12
 
@@ -72,6 +78,20 @@ def _oriented_pair(user: np.ndarray, template: np.ndarray):
     return (user[::-1] if reversed_error < forward else user), reversed_error < forward
 
 
+def _similarity_form_error(user: np.ndarray, template: np.ndarray) -> float:
+    """Compare form after one translation and uniform scale, but no rotation."""
+    user_centered = user - user.mean(axis=0)
+    template_centered = template - template.mean(axis=0)
+    user_low, user_high = user.min(axis=0), user.max(axis=0)
+    template_low, template_high = template.min(axis=0), template.max(axis=0)
+    user_diagonal = float(np.linalg.norm(user_high - user_low))
+    template_diagonal = float(np.linalg.norm(template_high - template_low))
+    scale = template_diagonal / max(user_diagonal, 1e-9)
+    return float(
+        np.linalg.norm(user_centered * scale - template_centered, axis=1).mean()
+    )
+
+
 def compute_score_breakdown(
     *,
     base_score: float,
@@ -80,6 +100,7 @@ def compute_score_breakdown(
     match: Sequence[int],
     missing: Sequence[int],
     extra: Sequence[int],
+    mode: str = "trace",
 ) -> ScoreBreakdown:
     """Blend learned evidence with translation-invariant whole-form geometry."""
     aligned_user = []
@@ -106,10 +127,13 @@ def compute_score_breakdown(
     if matched_count:
         user_points = np.concatenate(aligned_user)
         template_points = np.concatenate(aligned_template)
-        translation = template_points.mean(0) - user_points.mean(0)
-        form_error = float(
-            np.linalg.norm(user_points + translation - template_points, axis=1).mean()
-        )
+        if mode == "recall":
+            form_error = _similarity_form_error(user_points, template_points)
+        else:
+            translation = template_points.mean(0) - user_points.mean(0)
+            form_error = float(
+                np.linalg.norm(user_points + translation - template_points, axis=1).mean()
+            )
         position_error = float(np.mean(position_errors))
         shape_quality = float(np.exp(-SHAPE_ERROR_SCALE * form_error))
         position_quality = float(np.exp(-POSITION_ERROR_SCALE * position_error))
@@ -128,10 +152,13 @@ def compute_score_breakdown(
         * (1.0 - ORDER_PENALTY * order_ratio)
     )
     base = _clamp(base_score)
+    model_weight = RECALL_MODEL_WEIGHT if mode == "recall" else MODEL_WEIGHT
+    shape_weight = RECALL_SHAPE_WEIGHT if mode == "recall" else SHAPE_WEIGHT
+    position_weight = RECALL_POSITION_WEIGHT if mode == "recall" else POSITION_WEIGHT
     blended = (
-        SHAPE_WEIGHT * shape_quality
-        + MODEL_WEIGHT * base
-        + POSITION_WEIGHT * position_quality
+        shape_weight * shape_quality
+        + model_weight * base
+        + position_weight * position_quality
     )
     task_score = _clamp(blended * structure_factor * technique_factor)
     return ScoreBreakdown(
@@ -159,6 +186,7 @@ def _stroke_issue(
     shape_error: float,
     looks_reversed: bool,
     move: Sequence[float],
+    mode: str = "trace",
 ):
     if looks_reversed:
         return (
@@ -174,14 +202,23 @@ def _stroke_issue(
             95,
             "major",
         )
-    if shape_error > SHAPE_CORRECTION_THRESHOLD:
+    shape_threshold = (
+        RECALL_SHAPE_CORRECTION_THRESHOLD
+        if mode == "recall"
+        else SHAPE_CORRECTION_THRESHOLD
+    )
+    if shape_error > shape_threshold:
         return (
             "PATH_DEVIATION",
-            "모양이 다른 구간을 점선 정답 궤적에 가깝게 다듬어 보세요",
+            "모양이 다른 구간을 겹친 예시와 비슷하게 다듬어 보세요"
+            if mode == "recall"
+            else "모양이 다른 구간을 점선 정답 궤적에 가깝게 다듬어 보세요",
             75,
-            "minor" if shape_error < 0.14 else "major",
+            "minor" if shape_error < (
+                RECALL_MAJOR_SHAPE_THRESHOLD if mode == "recall" else 0.14
+            ) else "major",
         )
-    if position_error > POSITION_CORRECTION_THRESHOLD:
+    if mode != "recall" and position_error > POSITION_CORRECTION_THRESHOLD:
         return (
             "POSITION_OFFSET",
             f"형태는 유지하고 획 위치만 {_direction_text(move)}으로 옮겨 보세요",
@@ -200,6 +237,7 @@ def build_final_report(
     missing: Sequence[int],
     score_once: Callable[[Sequence[np.ndarray], Sequence[np.ndarray]], dict],
     top_k: int = 3,
+    mode: str = "trace",
 ) -> dict:
     """Create one consistent score/correction report for both scorer backends."""
     match_array = np.asarray(match, dtype=int)
@@ -214,6 +252,7 @@ def build_final_report(
         match=match_array,
         missing=missing_list,
         extra=extra,
+        mode=mode,
     )
 
     strokes_report = []
@@ -242,6 +281,15 @@ def build_final_report(
             user[user_index],
             template[template_index],
         )
+        if mode == "recall":
+            oriented, _ = _oriented_pair(
+                np.asarray(user[user_index], dtype=np.float64),
+                np.asarray(template[template_index], dtype=np.float64),
+            )
+            shape_error = _similarity_form_error(
+                oriented,
+                np.asarray(template[template_index], dtype=np.float64),
+            )
         move = (template[template_index].mean(0) - user[user_index].mean(0)).tolist()
         issue = _stroke_issue(
             user_index=user_index,
@@ -250,6 +298,7 @@ def build_final_report(
             shape_error=shape_error,
             looks_reversed=looks_reversed,
             move=move,
+            mode=mode,
         )
         entry.update(
             pos_err=position_error,
@@ -271,6 +320,7 @@ def build_final_report(
                 match=match_array,
                 missing=missing_list,
                 extra=extra,
+                mode=mode,
             )
             entry["gain"] = max(
                 0.0,
@@ -302,11 +352,13 @@ def build_final_report(
         "base_model_score": round(breakdown.base_model_score * 100, 1),
         "shape_score": round(breakdown.shape_score * 100, 1),
         "position_score": round(breakdown.position_score * 100, 1),
-        "score_policy": SCORE_POLICY,
+        "score_policy": RECALL_SCORE_POLICY if mode == "recall" else SCORE_POLICY,
         "score_components": {
-            "model_weight": MODEL_WEIGHT,
-            "shape_weight": SHAPE_WEIGHT,
-            "position_weight": POSITION_WEIGHT,
+            "model_weight": RECALL_MODEL_WEIGHT if mode == "recall" else MODEL_WEIGHT,
+            "shape_weight": RECALL_SHAPE_WEIGHT if mode == "recall" else SHAPE_WEIGHT,
+            "position_weight": (
+                RECALL_POSITION_WEIGHT if mode == "recall" else POSITION_WEIGHT
+            ),
             "structure_factor": round(breakdown.structure_factor, 4),
             "technique_factor": round(breakdown.technique_factor, 4),
         },

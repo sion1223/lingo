@@ -11,6 +11,7 @@ function metricsFromServer(metrics) {
     endError: finite(metrics.end_error),
     pathError: finite(metrics.path_error),
     shapeError: finite(metrics.shape_error),
+    formError: finite(metrics.form_error),
     directionCosine: finite(metrics.direction_cosine),
     lengthRatio: finite(metrics.length_ratio),
     bboxShift: metrics.bbox_shift ?? null,

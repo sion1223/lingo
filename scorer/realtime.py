@@ -61,6 +61,7 @@ class GeometryMetrics:
     end_error: float
     path_error: float
     shape_error: float
+    form_error: float
     direction_cosine: float
     length_ratio: float
     bbox_shift: tuple[float, float]
@@ -75,6 +76,8 @@ class GeometryMetrics:
     end_vector: tuple[float, float]
     problem_segment: tuple[tuple[float, float], ...]
     target_segment: tuple[tuple[float, float], ...]
+    form_problem_segment: tuple[tuple[float, float], ...]
+    form_target_segment: tuple[tuple[float, float], ...]
     aligned_user: np.ndarray
     aligned_template: np.ndarray
 
@@ -254,6 +257,18 @@ def compute_stroke_metrics(user_points: Sequence, template_points: Sequence) -> 
     direction = _direction_cosine(user, template)
     user_box_center, user_diagonal = _bounding_box(user)
     template_box_center, template_diagonal = _bounding_box(template)
+    normalized_user = centered_user / max(user_diagonal, EPSILON)
+    normalized_template = centered_template / max(template_diagonal, EPSILON)
+    form_alignment = banded_dtw(normalized_user, normalized_template)
+    form_error = _aligned_mean_distance(
+        normalized_user, normalized_template, form_alignment.path
+    )
+    fitted_scale = (
+        user_diagonal / template_diagonal
+        if user_diagonal >= EPSILON and template_diagonal >= EPSILON
+        else 1.0
+    )
+    fitted_template = centered_template * fitted_scale + user_box_center
     user_curvature = _curvature(user)
     template_curvature = _curvature(template)
 
@@ -261,6 +276,8 @@ def compute_stroke_metrics(user_points: Sequence, template_points: Sequence) -> 
     curvature_pair = (0, 0)
     maximum_error = -1.0
     maximum_path_index = 0
+    maximum_form_error = -1.0
+    maximum_form_path_index = 0
     for path_index, (user_index, template_index) in enumerate(forward.path):
         difference = abs(user_curvature[user_index] - template_curvature[template_index])
         if difference > curvature_difference:
@@ -270,10 +287,20 @@ def compute_stroke_metrics(user_points: Sequence, template_points: Sequence) -> 
         if aligned_error > maximum_error:
             maximum_error = aligned_error
             maximum_path_index = path_index
+    for path_index, (user_index, template_index) in enumerate(form_alignment.path):
+        aligned_error = float(
+            np.linalg.norm(normalized_user[user_index] - normalized_template[template_index])
+        )
+        if aligned_error > maximum_form_error:
+            maximum_form_error = aligned_error
+            maximum_form_path_index = path_index
 
     segment_start = max(0, maximum_path_index - 2)
     segment_end = min(len(forward.path), maximum_path_index + 3)
     problem_path = forward.path[segment_start:segment_end]
+    form_segment_start = max(0, maximum_form_path_index - 2)
+    form_segment_end = min(len(form_alignment.path), maximum_form_path_index + 3)
+    form_problem_path = form_alignment.path[form_segment_start:form_segment_end]
     reverse_advantage = _clamp(
         (path_error - reversed_alignment.distance) / max(path_error, 0.02), -1.0, 1.0
     )
@@ -287,6 +314,7 @@ def compute_stroke_metrics(user_points: Sequence, template_points: Sequence) -> 
         end_error=float(np.linalg.norm(user[-1] - template[-1])),
         path_error=path_error,
         shape_error=shape_error,
+        form_error=form_error,
         direction_cosine=direction,
         # Fixed-density paths keep high-rate pen jitter from becoming fake length.
         length_ratio=_arc_length(user) / max(_arc_length(template), EPSILON),
@@ -306,12 +334,21 @@ def compute_stroke_metrics(user_points: Sequence, template_points: Sequence) -> 
         target_segment=tuple(
             (float(template[j, 0]), float(template[j, 1])) for _, j in problem_path
         ),
+        form_problem_segment=tuple(
+            (float(user[i, 0]), float(user[i, 1])) for i, _ in form_problem_path
+        ),
+        form_target_segment=tuple(
+            (float(fitted_template[j, 0]), float(fitted_template[j, 1]))
+            for _, j in form_problem_path
+        ),
         aligned_user=user,
         aligned_template=template,
     )
 
 
-def _match_cost(metrics: GeometryMetrics) -> float:
+def _match_cost(metrics: GeometryMetrics, mode: str = "trace") -> float:
+    if mode == "recall":
+        return metrics.form_error + 0.035 * (1 - metrics.direction_cosine)
     return (
         metrics.path_error
         + 0.25 * metrics.start_error
@@ -324,6 +361,7 @@ def causal_match(
     current_stroke: Sequence,
     template_strokes: Sequence[Sequence],
     expected_index: int,
+    mode: str = "trace",
 ) -> CausalMatch:
     if expected_index >= len(template_strokes):
         return CausalMatch(None, expected_index, None, 0.98, extra_stroke=True)
@@ -331,15 +369,18 @@ def causal_match(
     matched_index = expected_index
     metrics = expected_metrics
     wrong_order = False
-    expected_cost = _match_cost(expected_metrics)
+    expected_cost = _match_cost(expected_metrics, mode)
     if expected_index + 1 < len(template_strokes):
         next_metrics = compute_stroke_metrics(current_stroke, template_strokes[expected_index + 1])
-        next_cost = _match_cost(next_metrics)
-        if next_cost + 0.025 < expected_cost * 0.72 and next_metrics.start_error < 0.12:
+        next_cost = _match_cost(next_metrics, mode)
+        position_supports_next = mode == "recall" or next_metrics.start_error < 0.12
+        if next_cost + 0.025 < expected_cost * 0.72 and position_supports_next:
             matched_index = expected_index + 1
             metrics = next_metrics
             wrong_order = True
-    confidence = _clamp(1 - _match_cost(metrics) / 0.22)
+    confidence = _clamp(
+        1 - _match_cost(metrics, mode) / (0.28 if mode == "recall" else 0.22)
+    )
     return CausalMatch(
         matched_index,
         expected_index,
@@ -398,6 +439,7 @@ def _candidate(
 def _select_cue(
     match: CausalMatch,
     evidence: ModelEvidence | None,
+    mode: str = "trace",
 ) -> CueCandidate | None:
     metrics = match.metrics
     if match.extra_stroke:
@@ -428,7 +470,7 @@ def _select_cue(
     )
     reverse_probability = evidence.reverse_probability if evidence else None
     order_probability = evidence.order_probability if evidence else None
-    if order_probability is not None and order_probability >= 0.8:
+    if mode == "trace" and order_probability is not None and order_probability >= 0.8:
         order_confidence = order_probability
         if not match.wrong_order:
             order_confidence = min(order_confidence, 0.78)
@@ -443,7 +485,7 @@ def _select_cue(
             )
         )
     if metrics.looks_reversed or metrics.direction_cosine < -0.45 or (
-        reverse_probability is not None and reverse_probability >= 0.8
+        mode == "trace" and reverse_probability is not None and reverse_probability >= 0.8
     ):
         confidence = max(
             0.86 if metrics.looks_reversed else 0.0,
@@ -469,6 +511,27 @@ def _select_cue(
                 anchor=metrics.aligned_user[0],
                 vector=metrics.start_vector,
             )
+        )
+    if mode == "recall":
+        if metrics.form_error > 0.08:
+            midpoint = metrics.form_problem_segment[
+                len(metrics.form_problem_segment) // 2
+            ]
+            candidates.append(
+                _candidate(
+                    "PATH_DEVIATION",
+                    "강조된 구간의 모양만 예시와 비슷하게 다듬어 보세요.",
+                    _confidence(metrics.form_error, 0.08, 0.20),
+                    85,
+                    metrics.form_error >= 0.20,
+                    anchor=midpoint,
+                )
+            )
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda candidate: candidate.priority * candidate.cue.confidence,
         )
     if metrics.start_error > 0.045:
         candidates.append(
@@ -638,9 +701,14 @@ class FastCoachEngine:
         if len(accepted) != request.expected_template_index:
             raise InvalidStroke("accepted stroke prefix does not match expected index")
         current = sanitize_points(request.current_stroke)
-        match = causal_match(current, template, request.expected_template_index)
+        match = causal_match(
+            current,
+            template,
+            request.expected_template_index,
+            mode=request.mode,
+        )
         evidence = self._model_evidence(request, template, accepted, current)
-        cue_candidate = _select_cue(match, evidence)
+        cue_candidate = _select_cue(match, evidence, mode=request.mode)
         cue = cue_candidate.cue if cue_candidate else None
         accepted = not (
             cue_candidate
@@ -655,7 +723,11 @@ class FastCoachEngine:
             request.expected_template_index + 1 if accepted and not match.extra_stroke
             else request.expected_template_index
         )
-        next_start = template[next_index][0] if next_index < len(template) else None
+        next_start = (
+            template[next_index][0]
+            if request.mode == "trace" and next_index < len(template)
+            else None
+        )
         metrics = match.metrics
         if metrics is None:
             # Extra strokes still receive a complete, finite metric contract.
@@ -665,6 +737,7 @@ class FastCoachEngine:
             end_error=metrics.end_error,
             path_error=metrics.path_error,
             shape_error=metrics.shape_error,
+            form_error=metrics.form_error,
             direction_cosine=metrics.direction_cosine,
             length_ratio=metrics.length_ratio,
             bbox_shift=Vector(dx=metrics.bbox_shift[0], dy=metrics.bbox_shift[1]),
@@ -697,8 +770,16 @@ class FastCoachEngine:
             primary_cue=cue,
             metrics=response_metrics,
             overlay=CoachOverlay(
-                problem_segment=list(metrics.problem_segment),
-                target_segment=list(metrics.target_segment),
+                problem_segment=list(
+                    metrics.form_problem_segment
+                    if request.mode == "recall"
+                    else metrics.problem_segment
+                ),
+                target_segment=list(
+                    metrics.form_target_segment
+                    if request.mode == "recall"
+                    else metrics.target_segment
+                ),
                 next_start=_anchor(next_start),
             ),
             next_action=NextAction(type=next_action_type, template_index=next_index, hint_level=0),
