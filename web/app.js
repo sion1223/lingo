@@ -11,6 +11,7 @@ import { LocalCoachController, TUTOR_STATES } from "./coach/controller.js";
 import { toLegacyStrokes } from "./coach/local-matcher.js";
 import { clamp, distance, toXY } from "./coach/metrics.js";
 import { CoachOverlay } from "./coach/overlay.js";
+import { bindStrokeEndEvents } from "./coach/pointer-boundary.js";
 import {
   buildCoachPayload,
   chooseHigherConfidence,
@@ -646,8 +647,7 @@ function endStroke(event) {
   }
 }
 
-elements.canvas.addEventListener("pointerup", endStroke);
-elements.canvas.addEventListener("pointercancel", endStroke);
+bindStrokeEndEvents(elements.canvas, endStroke);
 
 document.getElementById("undo").addEventListener("click", () => {
   if (!strokes.length) return;
