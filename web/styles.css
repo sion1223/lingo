@@ -300,12 +300,37 @@ button:focus-visible, input:focus-visible { outline: 3px solid #84adff; outline-
 
 .pchar:active { background: #d8e6f5; }
 
+.pchar.active {
+  background: #e7f0ff;
+  box-shadow: inset 0 0 0 2px #175cd3;
+}
+
 #picker-info {
   margin-top: 6px;
   color: #667085;
   font-size: 12px;
   text-align: center;
 }
+
+#picker-source {
+  margin-top: 6px;
+  color: #6b665f;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+#picker-source a { color: #175cd3; }
+
+#data-note {
+  max-width: 520px;
+  margin: 14px auto 0;
+  color: #6b665f;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+#data-note summary { cursor: pointer; }
 
 @media (max-width: 560px) {
   body { padding: 12px; }

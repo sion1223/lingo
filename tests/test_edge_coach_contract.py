@@ -20,13 +20,24 @@ def test_runpod_origin_comes_from_environment_only():
 
 def test_coach_route_has_its_own_short_unlogged_proxy_path():
     start = EDGE_SOURCE.index('if (body.action === "coach")')
-    end = EDGE_SOURCE.index("// 채점", start)
+    end = EDGE_SOURCE.index('if (body.action === "attempt")', start)
     coach_branch = EDGE_SOURCE[start:end]
 
     assert '"/coach/stroke"' in coach_branch
     assert "2500" in coach_branch
     assert "submissions" not in coach_branch
     assert "createClient" not in coach_branch
+
+
+def test_attempt_route_batches_rich_points_into_dedicated_storage():
+    start = EDGE_SOURCE.index('if (body.action === "attempt")')
+    end = EDGE_SOURCE.index('if (body.action === "verbalize"', start)
+    attempt_branch = EDGE_SOURCE[start:end]
+
+    assert 'from("writing_attempts").upsert' in attempt_branch
+    assert 'onConflict: "attempt_id,attempt_revision"' in attempt_branch
+    assert "body.strokes" in EDGE_SOURCE
+    assert "body.stroke_results" in EDGE_SOURCE
 
 
 def test_edge_errors_do_not_echo_internal_exception_text():

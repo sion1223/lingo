@@ -420,6 +420,11 @@ def _select_cue(
         return None
 
     candidates: list[CueCandidate] = []
+    position_only = (
+        metrics.shape_error <= 0.035
+        and metrics.direction_cosine >= 0.75
+        and 0.78 <= metrics.length_ratio <= 1.28
+    )
     reverse_probability = evidence.reverse_probability if evidence else None
     order_probability = evidence.order_probability if evidence else None
     if order_probability is not None and order_probability >= 0.8:
@@ -471,12 +476,12 @@ def _select_cue(
                 f"시작점을 {_direction_text(metrics.start_vector)}으로 옮겨 보세요.",
                 _confidence(metrics.start_error, 0.045, 0.16),
                 95,
-                metrics.start_error >= 0.16,
+                metrics.start_error >= 0.16 and not position_only,
                 anchor=metrics.aligned_user[0],
                 vector=metrics.start_vector,
             )
         )
-    if metrics.path_error > 0.048:
+    if metrics.path_error > 0.048 and not position_only:
         midpoint = metrics.problem_segment[len(metrics.problem_segment) // 2]
         candidates.append(
             _candidate(
@@ -495,7 +500,7 @@ def _select_cue(
                 f"끝점을 {_direction_text(metrics.end_vector)}으로 마무리해 보세요.",
                 _confidence(metrics.end_error, 0.055, 0.18),
                 60,
-                metrics.end_error >= 0.18,
+                metrics.end_error >= 0.18 and not position_only,
                 anchor=metrics.aligned_user[-1],
                 vector=metrics.end_vector,
             )

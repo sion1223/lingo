@@ -1,4 +1,11 @@
 import { ApiClient } from "./api.js";
+import {
+  applyServerStrokeResult,
+  buildAttemptPayload,
+  createStrokeResult,
+  markLastStrokeUndone,
+} from "./attempt-log.js";
+import { CharacterPickerModel, splitCharacters } from "./character-picker.js";
 import { BUILTIN_TEMPLATES, getBuiltinTemplate } from "./coach/builtin-templates.js";
 import { LocalCoachController, TUTOR_STATES } from "./coach/controller.js";
 import { toLegacyStrokes } from "./coach/local-matcher.js";
@@ -67,21 +74,34 @@ let stage = 1;
 let revealCount = 0;
 let framePending = false;
 let lastPartialAnalysisAt = Number.NEGATIVE_INFINITY;
-let allCharacters = "";
+let allCharacters = splitCharacters(Object.keys(BUILTIN_TEMPLATES));
+let visibleCharacters = [...allCharacters];
 let shownCharacters = 0;
+let characterCatalogPromise = null;
+let pickerComposing = false;
 let teacherNetworkAvailable = false;
 let currentTeacherContext = null;
 let repeatedErrorCode = null;
 let repeatedErrorCount = 0;
 const characterChunkSize = 400;
+const pickerModel = new CharacterPickerModel(allCharacters);
+const readingIndexUrl = new URL("./data/kanji-readings.json", import.meta.url);
 
 function identity(prefix) {
   if (globalThis.crypto?.randomUUID) return `${prefix}-${globalThis.crypto.randomUUID()}`;
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function currentCharacter() {
+  const characters = splitCharacters(elements.character.value.trim());
+  return characters.length === 1 ? characters[0] : null;
+}
+
 const sessionId = identity("session");
 let attemptId = identity("attempt");
+let attemptStartedAt = new Date().toISOString();
+let attemptStrokeResults = [];
+let attemptRecordedReason = null;
 
 function escapeHtml(value) {
   return String(value)
@@ -171,7 +191,7 @@ function prepareTeacherExplanation(diagnosis, { countAttempt = true } = {}) {
   const request = tryBuildTeacherFeedbackRequest({
     decisionId: identity("decision"),
     diagnosis,
-    targetChar: elements.character.value.trim(),
+    targetChar: currentCharacter(),
     nearestCompetitor: diagnosis.nearestCompetitor,
     mode: stage === 1 ? "trace" : "recall",
     totalStrokes: template?.length ?? 1,
@@ -339,10 +359,60 @@ function renderDiagnosis(diagnosis) {
   );
 }
 
+async function recordCurrentAttempt(
+  endedReason,
+  { finalScore = null, keepalive = false } = {},
+) {
+  const hasWriting = strokes.length > 0 || attemptStrokeResults.length > 0;
+  const character = templateCharacter || currentCharacter();
+  const upgradesFailedScore = (
+    attemptRecordedReason === "score_failed" && endedReason === "scored"
+  );
+  if (
+    !hasWriting
+    || !character
+    || (attemptRecordedReason && !upgradesFailedScore)
+  ) {
+    return false;
+  }
+  attemptRecordedReason = endedReason;
+  const payload = buildAttemptPayload({
+    sessionId,
+    attemptId,
+    attemptRevision: coach.lifecycle.revision,
+    character,
+    mode: stage === 1 ? "trace" : "recall",
+    endedReason,
+    startedAt: attemptStartedAt,
+    endedAt: new Date().toISOString(),
+    strokes,
+    strokeResults: attemptStrokeResults,
+    finalScore,
+  });
+  try {
+    const { status, body } = await api.request(
+      "attempt",
+      payload,
+      { keepalive },
+    );
+    if (status !== 202 || body.stored !== true) {
+      console.warn("attempt record unavailable", body.code || status);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    if (!keepalive) console.warn("attempt record unavailable", error);
+    return false;
+  }
+}
+
 function resetVisibleAttempt(message = "첫 획부터 천천히 써 보세요.") {
   coach.reset(template);
   clearTeacherState({ clearContext: true, resetHistory: true });
   attemptId = identity("attempt");
+  attemptStartedAt = new Date().toISOString();
+  attemptStrokeResults = [];
+  attemptRecordedReason = null;
   strokes = [];
   currentStroke = null;
   currentPointerId = null;
@@ -378,10 +448,15 @@ function cacheTemplate(character, value) {
 }
 
 async function loadTemplate({ forceNetwork = true } = {}) {
-  const character = elements.character.value.trim();
-  if (!character) return;
+  const character = currentCharacter();
+  if (!character) {
+    setCoachMessage("연습할 한 글자만 선택하고 Enter를 눌러 주세요.", "retry", "!");
+    return;
+  }
+  elements.character.value = character;
   const characterChanged = character !== templateCharacter;
   if (characterChanged) {
+    void recordCurrentAttempt("character_changed");
     templateCharacter = character;
     template = getBuiltinTemplate(character) || cachedTemplate(character);
     setStage(1);
@@ -452,8 +527,9 @@ async function requestServerRefinement({
   acceptedStrokes,
   completedStroke,
   expectedTemplateIndex,
+  historySequence,
 }) {
-  const character = elements.character.value.trim();
+  const character = currentCharacter();
   if (!character) return;
   coach.lifecycle.abortKind("coach");
   const token = coach.lifecycle.createRequest("coach");
@@ -488,6 +564,7 @@ async function requestServerRefinement({
       selected === serverDiagnosis
       && coach.applyServerRefinement(token, localDiagnosis, serverDiagnosis)
     ) {
+      applyServerStrokeResult(attemptStrokeResults, historySequence, serverDiagnosis);
       renderDiagnosis(serverDiagnosis);
       prepareTeacherExplanation(serverDiagnosis, { countAttempt: false });
     }
@@ -504,6 +581,9 @@ async function requestServerRefinement({
 elements.canvas.addEventListener("pointerdown", (event) => {
   if (event.pointerType === "pen") penSeen = true;
   if (penSeen && event.pointerType === "touch") return;
+  if (attemptRecordedReason) {
+    resetVisibleAttempt("새 시도를 시작합니다. 첫 획부터 써 보세요.");
+  }
   if (!coach.beginStroke()) return;
   coach.lifecycle.abortKind("coach");
   clearTeacherState({ clearContext: true });
@@ -545,6 +625,13 @@ function endStroke(event) {
   currentPointerId = null;
   strokes.push(completed);
   const diagnosis = coach.finishStroke(completed);
+  const history = createStrokeResult({
+    sequence: attemptStrokeResults.length,
+    strokeIndex: strokes.length - 1,
+    stroke: completed,
+    diagnosis,
+  });
+  attemptStrokeResults.push(history);
   redrawInk();
   renderDiagnosis(diagnosis);
   prepareTeacherExplanation(diagnosis);
@@ -554,6 +641,7 @@ function endStroke(event) {
       acceptedStrokes,
       completedStroke: completed,
       expectedTemplateIndex,
+      historySequence: history.sequence,
     });
   }
 }
@@ -563,6 +651,8 @@ elements.canvas.addEventListener("pointercancel", endStroke);
 
 document.getElementById("undo").addEventListener("click", () => {
   if (!strokes.length) return;
+  const removedStrokeIndex = strokes.length - 1;
+  markLastStrokeUndone(attemptStrokeResults, removedStrokeIndex);
   strokes.pop();
   coach.undoLast();
   clearTeacherState({ clearContext: true, resetHistory: true });
@@ -574,7 +664,10 @@ document.getElementById("undo").addEventListener("click", () => {
   redrawInk();
 });
 
-document.getElementById("clear").addEventListener("click", () => resetVisibleAttempt());
+document.getElementById("clear").addEventListener("click", () => {
+  void recordCurrentAttempt("cleared");
+  resetVisibleAttempt();
+});
 
 for (const quick of document.getElementsByClassName("quick")) {
   quick.addEventListener("click", (event) => {
@@ -585,6 +678,12 @@ for (const quick of document.getElementsByClassName("quick")) {
 
 document.getElementById("load").addEventListener("click", () => loadTemplate());
 elements.character.addEventListener("change", () => loadTemplate());
+elements.character.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.isComposing) {
+    event.preventDefault();
+    loadTemplate();
+  }
+});
 
 elements.hint.addEventListener("click", () => {
   if (!template) return;
@@ -669,38 +768,107 @@ elements.teacherExplain.addEventListener("click", async () => {
 });
 
 function renderCharacterChunk() {
-  const end = Math.min(shownCharacters + characterChunkSize, allCharacters.length);
+  const end = Math.min(shownCharacters + characterChunkSize, visibleCharacters.length);
   const fragment = document.createDocumentFragment();
   for (let index = shownCharacters; index < end; index += 1) {
     const item = document.createElement("div");
     item.className = "pchar";
-    item.textContent = allCharacters[index];
+    item.id = `picker-option-${index}`;
+    item.setAttribute("role", "option");
+    item.dataset.index = String(index);
+    item.dataset.character = visibleCharacters[index];
+    item.textContent = visibleCharacters[index];
+    item.setAttribute("aria-selected", String(index === pickerModel.activeIndex));
+    if (index === pickerModel.activeIndex) item.classList.add("active");
     fragment.appendChild(item);
   }
   elements.pickerGrid.appendChild(fragment);
   shownCharacters = end;
-  elements.pickerInfo.textContent = `${shownCharacters} / ${allCharacters.length}자 (스크롤하면 더 표시)`;
+  const query = elements.pickerSearch.value.trim();
+  elements.pickerInfo.textContent = query
+    ? `${visibleCharacters.length}개 검색 결과 · Enter로 확정`
+    : `${shownCharacters} / ${visibleCharacters.length}자 (스크롤하면 더 표시)`;
 }
 
-function resetCharacterGrid() {
+function resetCharacterGrid(characters = pickerModel.matches) {
+  visibleCharacters = [...characters];
   elements.pickerGrid.replaceChildren();
   shownCharacters = 0;
   renderCharacterChunk();
 }
 
+function renderActivePickerResult({ scroll = false } = {}) {
+  while (
+    pickerModel.activeIndex >= shownCharacters
+    && shownCharacters < visibleCharacters.length
+  ) {
+    renderCharacterChunk();
+  }
+  for (const item of elements.pickerGrid.querySelectorAll(".pchar.active")) {
+    item.classList.remove("active");
+    item.setAttribute("aria-selected", "false");
+  }
+  const active = document.getElementById(`picker-option-${pickerModel.activeIndex}`);
+  if (!active) {
+    elements.pickerSearch.removeAttribute("aria-activedescendant");
+    return;
+  }
+  active.classList.add("active");
+  active.setAttribute("aria-selected", "true");
+  elements.pickerSearch.setAttribute("aria-activedescendant", active.id);
+  if (scroll) active.scrollIntoView({ block: "nearest" });
+}
+
+function refreshPickerSearch() {
+  resetCharacterGrid(pickerModel.setQuery(elements.pickerSearch.value));
+  renderActivePickerResult();
+}
+
+function commitPickerCharacter(character) {
+  if (!character) return;
+  elements.character.value = character;
+  elements.picker.style.display = "none";
+  elements.pickerSearch.value = "";
+  pickerModel.setQuery("");
+  void loadTemplate();
+}
+
+async function loadCharacterCatalog() {
+  if (characterCatalogPromise) return characterCatalogPromise;
+  characterCatalogPromise = Promise.allSettled([
+    api.request("chars"),
+    fetch(readingIndexUrl).then(async (response) => {
+      if (!response.ok) throw new Error("reading index unavailable");
+      return response.json();
+    }),
+  ]).then(([catalog, readings]) => {
+    const serverCharacters = catalog.status === "fulfilled"
+      && catalog.value.status === 200
+      && typeof catalog.value.body.chars === "string"
+      ? splitCharacters(catalog.value.body.chars)
+      : [];
+    const indexedKanji = readings.status === "fulfilled"
+      ? Object.keys(readings.value.readings ?? {})
+      : [];
+    allCharacters = splitCharacters([
+      ...serverCharacters,
+      ...indexedKanji,
+      ...Object.keys(BUILTIN_TEMPLATES),
+    ]);
+    pickerModel.setCharacters(allCharacters);
+    if (readings.status === "fulfilled") {
+      pickerModel.setReadingIndex(readings.value.readings ?? {});
+    }
+    refreshPickerSearch();
+  });
+  return characterCatalogPromise;
+}
+
 document.getElementById("pick").addEventListener("click", async () => {
   elements.picker.style.display = "flex";
   elements.pickerSearch.focus();
-  if (allCharacters) return;
-  try {
-    const { status, body } = await api.request("chars");
-    allCharacters = status === 200 && body.chars
-      ? body.chars
-      : Object.keys(BUILTIN_TEMPLATES).join("");
-  } catch {
-    allCharacters = Object.keys(BUILTIN_TEMPLATES).join("");
-  }
-  resetCharacterGrid();
+  resetCharacterGrid(pickerModel.setQuery(elements.pickerSearch.value));
+  await loadCharacterCatalog();
 });
 
 document.getElementById("picker-close").addEventListener("click", () => {
@@ -713,14 +881,12 @@ elements.picker.addEventListener("click", (event) => {
 
 elements.pickerGrid.addEventListener("click", (event) => {
   if (!event.target.classList.contains("pchar")) return;
-  elements.character.value = event.target.textContent;
-  elements.picker.style.display = "none";
-  loadTemplate();
+  commitPickerCharacter(event.target.dataset.character || event.target.textContent);
 });
 
 elements.pickerGrid.addEventListener("scroll", () => {
   if (
-    shownCharacters < allCharacters.length
+    shownCharacters < visibleCharacters.length
     && elements.pickerGrid.scrollTop + elements.pickerGrid.clientHeight
       > elements.pickerGrid.scrollHeight - 200
   ) {
@@ -728,26 +894,65 @@ elements.pickerGrid.addEventListener("scroll", () => {
   }
 });
 
-elements.pickerSearch.addEventListener("input", () => {
-  const value = elements.pickerSearch.value;
-  for (const character of value) {
-    if (allCharacters.includes(character)) {
-      elements.pickerSearch.value = "";
-      elements.character.value = character;
-      elements.picker.style.display = "none";
-      loadTemplate();
-      break;
-    }
-  }
+elements.pickerSearch.addEventListener("compositionstart", () => {
+  pickerComposing = true;
 });
 
+elements.pickerSearch.addEventListener("compositionend", () => {
+  pickerComposing = false;
+  refreshPickerSearch();
+});
+
+elements.pickerSearch.addEventListener("input", (event) => {
+  if (pickerComposing || event.isComposing) return;
+  refreshPickerSearch();
+});
+
+elements.pickerSearch.addEventListener("keydown", (event) => {
+  if (pickerComposing || event.isComposing || event.keyCode === 229) return;
+  if (event.key === "Enter") {
+    event.preventDefault();
+    commitPickerCharacter(pickerModel.commit());
+    return;
+  }
+  if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+    event.preventDefault();
+    pickerModel.move(1);
+    renderActivePickerResult({ scroll: true });
+    return;
+  }
+  if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+    event.preventDefault();
+    pickerModel.move(-1);
+    renderActivePickerResult({ scroll: true });
+    return;
+  }
+  if (event.key === "Escape") elements.picker.style.display = "none";
+});
+
+function correctionLabel(correction) {
+  if (correction.error_code === "MISSING_STROKE") {
+    return `${correction.template_index + 1}번 획 누락`;
+  }
+  if (correction.error_code === "EXTRA_STROKE") {
+    return `${correction.index + 1}번 획 추가`;
+  }
+  if (correction.error_code === "POSITION_OFFSET" && correction.index < 0) {
+    return "전체 위치";
+  }
+  return correction.index >= 0 ? `${correction.index + 1}번 획` : "전체 형태";
+}
+
 function renderScoreReport(body) {
+  const scoreDetails = body.shape_score != null && body.position_score != null
+    ? `형태 ${escapeHtml(body.shape_score)} · 위치 ${escapeHtml(body.position_score)}`
+      + ` · AI ${escapeHtml(body.base_model_score)}`
+    : `모델 점수 ${escapeHtml(body.base_model_score)}`;
   let html = `<div id="score-big">${escapeHtml(body.score)}점</div>`
-    + `<div id="score-sub">모델 점수 ${escapeHtml(body.base_model_score)}`
-    + ` · ${escapeHtml(body.elapsed)}초</div>`;
+    + `<div id="score-sub">${scoreDetails} · ${escapeHtml(body.elapsed)}초</div>`;
   const corrections = body.corrections || [];
   for (const correction of corrections) {
-    const label = correction.index >= 0 ? `${correction.index + 1}번 획` : "누락";
+    const label = correctionLabel(correction);
     const gain = correction.gain != null && correction.gain > 0
       ? ` (+${Number(correction.gain).toFixed(1)}점 기대)`
       : "";
@@ -766,7 +971,7 @@ function renderScoreReport(body) {
 }
 
 document.getElementById("go").addEventListener("click", async () => {
-  const character = elements.character.value.trim();
+  const character = currentCharacter();
   if (!character) {
     setCoachMessage("연습할 문자를 먼저 입력하세요.", "retry", "!");
     return;
@@ -791,6 +996,7 @@ document.getElementById("go").addEventListener("click", async () => {
     elements.busyOverlay.style.display = "none";
     if (status !== 200) {
       coach.finishFinalScore(token, false);
+      void recordCurrentAttempt("score_failed");
       elements.result.innerHTML = `<div class="msg">${escapeHtml(
         body.message || body.detail || `오류: ${status}`,
       )}</div>`;
@@ -798,6 +1004,7 @@ document.getElementById("go").addEventListener("click", async () => {
       return;
     }
     coach.finishFinalScore(token, true);
+    void recordCurrentAttempt("scored", { finalScore: Number(body.score) });
     lastReport = body;
     if (!template && isTemplate(body.template)) {
       template = body.template;
@@ -811,12 +1018,16 @@ document.getElementById("go").addEventListener("click", async () => {
     if (error.name === "AbortError" || !coach.lifecycle.isCurrent(token)) return;
     elements.busyOverlay.style.display = "none";
     coach.finishFinalScore(token, false);
+    void recordCurrentAttempt("score_failed");
     elements.result.innerHTML = '<div class="msg">네트워크 오류 — 로컬 코치는 계속 사용할 수 있습니다.</div>';
     setCoachMessage("서버 없이도 획별 로컬 교정은 계속 받을 수 있습니다.", "nudge", "↯");
   }
 });
 
 window.addEventListener("resize", configureCanvases);
+window.addEventListener("pagehide", () => {
+  void recordCurrentAttempt("page_hidden", { keepalive: true });
+});
 
 setStage(1);
 configureCanvases();

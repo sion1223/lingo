@@ -100,6 +100,97 @@ function stableCodes(value: unknown) {
     : [];
 }
 
+function boundedString(value: unknown, maximum: number) {
+  return typeof value === "string" && value.length >= 1 && value.length <= maximum
+    ? value
+    : null;
+}
+
+function finitePoint(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.length === 2 && value.every((item) => (
+      typeof item === "number" && Number.isFinite(item)
+    ));
+  }
+  const point = record(value);
+  return typeof point.x === "number" && Number.isFinite(point.x)
+    && typeof point.y === "number" && Number.isFinite(point.y);
+}
+
+function validStrokes(value: unknown) {
+  return Array.isArray(value)
+    && value.length <= 64
+    && value.every((stroke) => (
+      Array.isArray(stroke)
+      && stroke.length >= 1
+      && stroke.length <= 4096
+      && stroke.every(finitePoint)
+    ));
+}
+
+function attemptRow(body: RequestBody) {
+  const sessionId = boundedString(body.session_id, 128);
+  const attemptId = boundedString(body.attempt_id, 128);
+  const character = typeof body.char === "string" && [...body.char.trim()].length === 1
+    ? body.char.trim()
+    : null;
+  const clientVersion = boundedString(body.client_version, 64);
+  const revision = body.attempt_revision;
+  const startedAt = body.started_at;
+  const endedAt = body.ended_at;
+  const strokeResults = body.stroke_results;
+  const finalScore = body.final_score;
+  if (
+    body.protocol_version !== 1
+    || !sessionId
+    || !attemptId
+    || !character
+    || !clientVersion
+    || typeof revision !== "number"
+    || !Number.isInteger(revision)
+    || revision < 0
+    || !["trace", "recall"].includes(String(body.mode))
+    || ![
+      "scored",
+      "score_failed",
+      "cleared",
+      "character_changed",
+      "page_hidden",
+    ].includes(String(body.ended_reason))
+    || typeof startedAt !== "string"
+    || !Number.isFinite(Date.parse(startedAt))
+    || typeof endedAt !== "string"
+    || !Number.isFinite(Date.parse(endedAt))
+    || Date.parse(endedAt) < Date.parse(startedAt)
+    || !validStrokes(body.strokes)
+    || !Array.isArray(strokeResults)
+    || strokeResults.length > 4096
+    || ((body.strokes as unknown[]).length === 0 && strokeResults.length === 0)
+    || (finalScore != null && (
+      typeof finalScore !== "number" || !Number.isFinite(finalScore)
+      || finalScore < 0 || finalScore > 100
+    ))
+  ) {
+    return null;
+  }
+  return {
+    protocol_version: 1,
+    session_id: sessionId,
+    attempt_id: attemptId,
+    attempt_revision: revision,
+    chr: character,
+    mode: body.mode,
+    ended_reason: body.ended_reason,
+    started_at: startedAt,
+    ended_at: endedAt,
+    strokes: body.strokes,
+    stroke_results: strokeResults,
+    final_score: finalScore ?? null,
+    training_consent: false,
+    client_version: clientVersion,
+  };
+}
+
 function teacherProxyHeaders(): Record<string, string> {
   const headers = { "Content-Type": "application/json" };
   if (TEACHER_API_TOKEN) {
@@ -242,6 +333,28 @@ Deno.serve(async (req) => {
           timedOut ? 504 : 503,
         );
       }
+    }
+    if (body.action === "attempt") {
+      const row = attemptRow(body);
+      if (!row) {
+        return json({ code: "INVALID_ATTEMPT", message: "필기 기록 형식이 올바르지 않습니다." }, 400);
+      }
+      const sb = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+      );
+      const { error } = await sb.from("writing_attempts").upsert(row, {
+        onConflict: "attempt_id,attempt_revision",
+      });
+      if (error) {
+        console.error("writing_attempts upsert:", error.message);
+        return json({ stored: false, code: "ATTEMPT_STORE_UNAVAILABLE" }, 503);
+      }
+      return json({
+        stored: true,
+        attempt_id: row.attempt_id,
+        attempt_revision: row.attempt_revision,
+      }, 202);
     }
     if (body.action === "verbalize" || body.action === "summary") {
       try {

@@ -90,6 +90,19 @@ def test_geometry_only_engine_returns_structured_single_cue():
     assert response.latency_ms >= 0
 
 
+def test_geometry_only_engine_accepts_same_shape_with_parallel_translation():
+    strokes = template_strokes()
+    shifted = strokes[0] + np.array([0.0, 0.2])
+    engine = FastCoachEngine(lambda _char: strokes)
+
+    response = engine.coach(request(shifted.tolist()))
+
+    assert response.metrics.shape_error == pytest.approx(0.0, abs=1e-8)
+    assert response.primary_cue.code == "START_OFFSET"
+    assert response.accepted is True
+    assert response.intervention == "nudge"
+
+
 def test_lightweight_model_is_called_once_and_conflict_stays_a_nudge():
     strokes = template_strokes()
     model = FakeStrokeModel(reverse_logit=5.0)

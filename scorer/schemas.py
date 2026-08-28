@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from enum import Enum
+from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
 LegacyPoint = tuple[FiniteFloat, FiniteFloat]
@@ -149,3 +150,66 @@ class CoachStrokeResponse(BaseModel):
     overlay: CoachOverlay
     next_action: NextAction
     latency_ms: float = Field(ge=0)
+
+
+class AttemptStrokeResult(BaseModel):
+    """Append-only history for every completed stroke, including undone ones."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sequence: int = Field(default=0, ge=0, le=4095)
+    stroke_index: int = Field(ge=0, le=63)
+    stroke: Stroke | None = None
+    matched_template_index: int | None = Field(default=None, ge=0, le=63)
+    accepted: bool
+    error_code: ErrorCode | None = None
+    confidence: float = Field(ge=0, le=1)
+    intervention: Literal["silent", "nudge", "pause_and_retry"]
+    source: Literal["local", "server"] = "local"
+    undone: bool = False
+
+
+class AttemptEvent(BaseModel):
+    """One batched, anonymous writing attempt with lossless point metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    protocol_version: Literal[1] = 1
+    session_id: str = Field(min_length=1, max_length=128)
+    attempt_id: str = Field(min_length=1, max_length=128)
+    attempt_revision: int = Field(ge=0)
+    char: str = Field(min_length=1, max_length=2)
+    mode: Literal["trace", "recall"]
+    ended_reason: Literal[
+        "scored",
+        "score_failed",
+        "cleared",
+        "character_changed",
+        "page_hidden",
+    ]
+    started_at: datetime
+    ended_at: datetime
+    strokes: Annotated[list[Stroke], Field(max_length=64)] = Field(default_factory=list)
+    stroke_results: Annotated[
+        list[AttemptStrokeResult],
+        Field(max_length=4096),
+    ] = Field(default_factory=list)
+    final_score: float | None = Field(default=None, ge=0, le=100)
+    training_consent: Literal[False] = False
+    client_version: str = Field(min_length=1, max_length=64)
+
+    @field_validator("char")
+    @classmethod
+    def one_attempt_character(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) != 1:
+            raise ValueError("char must contain exactly one character")
+        return value
+
+    @model_validator(mode="after")
+    def chronological_attempt(self):
+        if self.ended_at < self.started_at:
+            raise ValueError("ended_at must not precede started_at")
+        if not self.strokes and not self.stroke_results:
+            raise ValueError("attempt must contain at least one stroke event")
+        return self

@@ -48,6 +48,26 @@ test("major direction reversal pauses for a retry", () => {
   });
 });
 
+test("a translated but correctly shaped stroke gets a nudge instead of a retry", () => {
+  const cue = selectPrimaryCue(metrics({
+    startError: 0.2,
+    endError: 0.2,
+    pathError: 0.2,
+    shapeError: 0,
+    directionCosine: 1,
+    lengthRatio: 1,
+    startVector: { dx: 0, dy: -0.2 },
+    endVector: { dx: 0, dy: -0.2 },
+  }));
+
+  assert.equal(cue.code, "START_OFFSET");
+  assert.deepEqual(cueDecision(cue), {
+    accepted: true,
+    severity: "minor",
+    intervention: "nudge",
+  });
+});
+
 test("length thresholds expose stable TOO_SHORT and TOO_LONG codes", () => {
   assert.equal(selectPrimaryCue(metrics({ lengthRatio: 0.6 })).code, "TOO_SHORT");
   assert.equal(selectPrimaryCue(metrics({ lengthRatio: 1.5 })).code, "TOO_LONG");

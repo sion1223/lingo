@@ -29,7 +29,12 @@ from scorer.chandra_scorer import analyze_chandra, load_chandra_scorer
 from scorer.hybrid import HybridScorer, load_stroke_scorer
 from scorer.kanjivg import char_to_file, load_char
 from scorer.realtime import FastCoachEngine, InvalidStroke, TemplateUnavailable
-from scorer.schemas import ApiErrorCode, CoachStrokeRequest, CoachStrokeResponse
+from scorer.schemas import (
+    ApiErrorCode,
+    AttemptEvent,
+    CoachStrokeRequest,
+    CoachStrokeResponse,
+)
 from scorer.teacher_renderer import TeacherRenderer, deterministic_fallback
 from scorer.teacher_schemas import TeacherFeedbackEnvelope, TeacherFeedbackRequest
 
@@ -177,6 +182,23 @@ _teacher_request_budget = TeacherRequestBudget(
     _configured_teacher_daily_limit(),
 )
 _teacher_client_salt = os.urandom(16)
+_attempt_log_lock = threading.Lock()
+
+
+def _attempt_log_path():
+    configured = os.environ.get('ATTEMPT_LOG_PATH', '').strip()
+    return Path(configured) if configured else ROOT_DIR / 'artifacts' / 'attempt-events.jsonl'
+
+
+def record_attempt_event(event: AttemptEvent):
+    """Append an anonymous attempt atomically enough for the single server process."""
+    path = _attempt_log_path()
+    payload = event.model_dump_json(exclude_none=False)
+    with _attempt_log_lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('a', encoding='utf-8', newline='\n') as log:
+            log.write(payload)
+            log.write('\n')
 
 
 def get_stroke_model():
@@ -390,7 +412,7 @@ async def lifespan(_app):
 app = FastAPI(title='lingo-kanji-scorer', lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=['*'],
                    allow_methods=['*'], allow_headers=['*'])
-app.mount('/web', StaticFiles(directory=WEB_DIR), name='web')
+app.mount('/web', StaticFiles(directory=WEB_DIR, html=True), name='web')
 
 
 @app.exception_handler(RequestValidationError)
@@ -520,6 +542,24 @@ def coach_stroke(req: CoachStrokeRequest):
             'code': ApiErrorCode.COACH_FAILED.value,
             'message': '획을 분석하지 못했습니다',
         }) from exc
+
+
+@app.post('/attempt/events', status_code=202)
+def attempt_events(req: AttemptEvent):
+    """Persist one end-of-attempt batch without entering either scoring path."""
+    try:
+        record_attempt_event(req)
+    except OSError as exc:
+        LOGGER.exception('attempt event persistence failed')
+        raise HTTPException(503, {
+            'code': 'ATTEMPT_STORE_UNAVAILABLE',
+            'message': '필기 기록을 저장하지 못했습니다',
+        }) from exc
+    return {
+        'stored': True,
+        'attempt_id': req.attempt_id,
+        'attempt_revision': req.attempt_revision,
+    }
 
 
 @app.post('/coach/verbalize', response_model=TeacherFeedbackEnvelope)

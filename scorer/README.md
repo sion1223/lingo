@@ -11,6 +11,7 @@ scorer/
   kanjivg.py          SVG 베지어 -> 획별 좌표 시퀀스 파싱/정규화
   synth.py            정답 획에 제어된 왜곡 -> 학습자 글씨 + 점수 라벨 합성
   data.py             torch Dataset / 배치 변환 (점 특징: x,y,dx,dy,획시작)
+  confusion_dataset.py 좌표·비전 모델이 공유하는 문자 혼동 sample contract
   model.py            PointEncoder(Transformer) / Recognizer / Scorer
   train_recognizer.py 1단계: 문자 인식 모델 사전학습
   train_scorer.py     2단계: 인코더 전이 + 채점 헤드 파인튜닝

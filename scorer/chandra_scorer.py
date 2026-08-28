@@ -179,61 +179,17 @@ def analyze_chandra(model, template, raw_user_strokes, top_k=3):
     """Chandra 채점 + 교정 제안. feedback.analyze 와 동일한 리포트 형식.
     (렌더링이 비미분이라 그래디언트 대신 반사실 분석 + 기하 이동벡터 사용)"""
     from .feedback import prepare_user_strokes, match_strokes
-    from .synth import stroke_errors
+    from .final_report import build_final_report
     model.eval()
     user = prepare_user_strokes(raw_user_strokes)
     match, missing = match_strokes(user, template)
-    extra = [i for i in range(len(user)) if match[i] < 0]
-
     out = _score_once(model, user, template)
-    base = float(out['overall'][0])
-    q = out['q'][0].float().cpu().numpy()
-    rev_p = torch.sigmoid(out['rev_logit'][0]).float().cpu().numpy()
-    ord_p = torch.sigmoid(out['ord_logit'][0]).float().cpu().numpy()
-
-    nt = len(template)
-    coverage = (nt - len(missing)) / max(nt, 1)
-    precision = (len(user) - len(extra)) / max(len(user), 1)
-    structure_factor = coverage * precision
-    score = base * structure_factor
-
-    strokes_report = []
-    for i in range(len(user)):
-        j = int(match[i])
-        entry = dict(index=i, template_index=j, q=float(q[i]),
-                     rev_prob=float(rev_p[i]), ord_prob=float(ord_p[i]))
-        if j >= 0:
-            pe, se, looks_rev = stroke_errors(user[i], template[j])
-            entry.update(pos_err=pe, shape_err=se)
-            fixed = list(user)
-            fixed[i] = template[j].copy()
-            cf = _score_once(model, fixed, template)
-            entry['gain'] = (float(cf['overall'][0]) - base) * structure_factor * 100
-            entry['move'] = (template[j].mean(0) - user[i].mean(0)).tolist()
-            msgs = []
-            if entry['rev_prob'] > 0.5 or looks_rev:
-                msgs.append('필순 방향이 반대입니다 — 반대쪽 끝에서 시작하세요')
-            if entry['ord_prob'] > 0.5:
-                msgs.append(f'획 순서 오류 — 이 획은 {j + 1}번째로 써야 합니다')
-            if pe > 0.06:
-                dx, dy = entry['move']
-                h = '오른쪽' if dx > 0.02 else ('왼쪽' if dx < -0.02 else '')
-                v = '아래' if dy > 0.02 else ('위' if dy < -0.02 else '')
-                msgs.append(f'위치를 {h}{"·" if h and v else ""}{v}로 옮기세요')
-            if se > 0.05:
-                msgs.append('모양을 정답 궤적에 가깝게 교정하세요')
-            entry['messages'] = msgs or ['잘 썼습니다']
-        else:
-            entry.update(gain=0.0, messages=['불필요한(대응 없는) 획입니다 — 지우세요'])
-        strokes_report.append(entry)
-
-    corrections = sorted(
-        [e for e in strokes_report if e.get('gain', 0) > 0.5 or e['template_index'] < 0],
-        key=lambda e: -(e.get('gain') or 0))[:top_k]
-    for j in missing:
-        corrections.append(dict(index=-1, template_index=j, gain=None,
-                                messages=[f'{j + 1}번째 획이 빠졌습니다 — 추가하세요']))
-
-    return dict(score=round(score * 100, 1), base_model_score=round(base * 100, 1),
-                strokes=strokes_report, missing=missing, extra=extra,
-                match=match.tolist(), corrections=corrections, user=user)
+    return build_final_report(
+        output=out,
+        user=user,
+        template=template,
+        match=match,
+        missing=missing,
+        score_once=lambda fixed, target: _score_once(model, fixed, target),
+        top_k=top_k,
+    )

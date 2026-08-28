@@ -80,6 +80,12 @@ export function selectPrimaryCue(metrics, context = {}, thresholds = DEFAULT_POL
   }
 
   const cues = [];
+  const positionOnly = (
+    metrics.shapeError <= 0.035
+    && metrics.directionCosine >= 0.75
+    && metrics.lengthRatio >= 0.78
+    && metrics.lengthRatio <= 1.28
+  );
   if (metrics.looksReversed || metrics.directionCosine < -0.45) {
     cues.push(candidate({
       code: ERROR_CODES.DIRECTION_REVERSED,
@@ -96,13 +102,13 @@ export function selectPrimaryCue(metrics, context = {}, thresholds = DEFAULT_POL
       code: ERROR_CODES.START_OFFSET,
       priority: 95,
       confidence: confidence(metrics.startError, thresholds.startNudge, thresholds.startRetry),
-      major: metrics.startError >= thresholds.startRetry,
+      major: !positionOnly && metrics.startError >= thresholds.startRetry,
       text: `시작점을 ${koreanDirection(metrics.startVector)}으로 옮겨 보세요.`,
       anchor: { x: metrics.alignedUser[0][0], y: metrics.alignedUser[0][1] },
       vector: metrics.startVector,
     }));
   }
-  if (metrics.pathError > thresholds.pathNudge) {
+  if (metrics.pathError > thresholds.pathNudge && !positionOnly) {
     const problemAnchor = metrics.problemSegment.at(
       Math.floor(metrics.problemSegment.length / 2),
     );
@@ -120,7 +126,7 @@ export function selectPrimaryCue(metrics, context = {}, thresholds = DEFAULT_POL
       code: ERROR_CODES.END_OFFSET,
       priority: 60,
       confidence: confidence(metrics.endError, thresholds.endNudge, thresholds.endRetry),
-      major: metrics.endError >= thresholds.endRetry,
+      major: !positionOnly && metrics.endError >= thresholds.endRetry,
       text: `끝점을 ${koreanDirection(metrics.endVector)}으로 마무리해 보세요.`,
       anchor: { x: metrics.alignedUser.at(-1)[0], y: metrics.alignedUser.at(-1)[1] },
       vector: metrics.endVector,

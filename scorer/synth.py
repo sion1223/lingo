@@ -8,7 +8,7 @@ import numpy as np
 
 # 획별 품질 q = exp(-(W_SHAPE*shape_err + W_POS*pos_err))
 W_SHAPE = 7.0
-W_POS = 5.5
+W_POS = 2.0
 REV_FACTOR = 0.6    # 필순(방향) 반전 시 곱해지는 감점 계수
 ORDER_FACTOR = 0.75  # 획 순서 오류 시 감점 계수
 

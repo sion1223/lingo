@@ -2,15 +2,19 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="한자와 일본어 문자를 검색하고 획순·형태 교정을 받으며 필기를 연습하는 링고 튜터">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="lingo-api-base-url" content="">
   <meta name="lingo-edge-endpoint" content="">
   <meta name="lingo-api-key" content="">
   <title>링고 — 한자 필기 채점</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/web/styles.css">
 </head>
 <body>
+  <main>
   <h1>링고 — 한자 필기 튜터</h1>
   <div id="status">
     <span class="dot" id="dot" aria-hidden="true"></span><span id="stxt">서버 확인 중…</span>
@@ -18,7 +22,7 @@
   </div>
 
   <div class="bar">
-    <input id="chr" value="永" maxlength="1" aria-label="연습할 문자">
+    <input id="chr" value="永" maxlength="2" aria-label="연습할 문자">
     <button id="pick" type="button">문자 선택</button>
     <button id="load" type="button">가이드</button>
     <button id="hint" type="button" hidden>한 획 보기</button>
@@ -56,17 +60,35 @@
     <div id="teacher-secondary" hidden></div>
   </div>
   <div id="result"></div>
+  <details id="data-note">
+    <summary>필기 기록 안내</summary>
+    연습이 끝날 때 익명 세션 ID와 획의 순서·좌표·시간·필압·기울기 및 교정 결과를
+    한 묶음으로 서버에 저장합니다. 개인 식별 정보는 수집하지 않으며, 현재 기록은
+    학습 동의가 없는 상태로 저장되어 별도 동의 전에는 모델 학습에 사용하지 않습니다.
+  </details>
 
   <div id="picker" role="dialog" aria-modal="true" aria-label="문자 선택">
     <div id="picker-box">
       <div id="picker-top">
-        <input id="picker-search" placeholder="문자 붙여넣기·입력하면 바로 선택" maxlength="4">
+        <input
+          id="picker-search"
+          placeholder="한자·가나·로마자 검색 후 Enter"
+          autocomplete="off"
+          aria-label="한자·가나·로마자 검색"
+          aria-controls="picker-grid"
+        >
         <button id="picker-close" type="button">닫기</button>
       </div>
-      <div id="picker-grid"></div>
-      <div id="picker-info"></div>
+      <div id="picker-grid" role="listbox" aria-label="검색 결과"></div>
+      <div id="picker-info" aria-live="polite"></div>
+      <div id="picker-source">
+        한자 읽기: <a href="https://www.edrdg.org/wiki/index.php/KANJIDIC_Project"
+          target="_blank" rel="noreferrer">EDRDG KANJIDIC2</a>
+        · 입력을 마친 뒤 Enter로 확정
+      </div>
     </div>
   </div>
+  </main>
 
   <script type="module" src="/web/app.js"></script>
 </body>

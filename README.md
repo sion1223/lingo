@@ -72,6 +72,33 @@ python -m uvicorn scorer.server:app --host 127.0.0.1 --port 8000
 `window.LINGO_CONFIG = { apiBaseUrl, edgeEndpoint, apiKey }`를 런타임에서 주입한다.
 배포 URL과 키는 소스에 새로 하드코딩하지 않는다.
 
+## 문자 검색과 필기 기록
+
+문자 선택 창은 일본어 IME 조합을 `input` 중에 확정하지 않는다. 한자·가나 또는 로마자
+읽기를 끝까지 입력한 뒤 `Enter`를 누르거나 검색 결과를 클릭해야 연습 문자가 바뀐다.
+한자 읽기 검색 인덱스는 EDRDG KANJIDIC2에서 생성하며 다음 명령으로 갱신한다.
+
+```bash
+python scripts/update_kanji_readings.py
+```
+
+`web/data/KANJIDIC2-NOTICE.md`의 출처·라이선스·월별 갱신 조건을 유지한다.
+
+브라우저는 채점, 전체 지우기, 문자 변경, 페이지 종료 시 필기 시도를 한 번의 배치로
+`POST /attempt/events` 또는 Edge의 `action: "attempt"`에 보낸다. 최종 획뿐 아니라 되돌린
+획도 append-only `stroke_results`에 남고, 좌표·순서·상대 시간·필압·기울기·포인터 종류와
+로컬/서버 교정 판정을 보존한다. 직접 FastAPI 모드는 기본적으로 Git에서 제외된
+`artifacts/attempt-events.jsonl`에 기록하며 `ATTEMPT_LOG_PATH`로 경로를 바꿀 수 있다.
+
+Supabase 배포 전에는
+`supabase/migrations/20260821000000_create_writing_attempts.sql`을 적용한다. 저장 행의
+`training_consent`는 항상 `false`이며, 별도의 동의·보존 기간·삭제 경로가 구현되기 전에는
+모델 학습에 재사용하지 않는다.
+
+최종 점수는 `shape_tolerant_v1` 정책으로 형태 68%, 기존 모델 22%, 위치 10%를 결합한다.
+기존 모델 원점수는 `base_model_score`에 그대로 남으며, 누락·추가 획과 실제 방향·순서
+오류는 계속 감점한다.
+
 서버 배포 시 `serve.sh`가 현재 checkout의 SHA를 `BUILD_SHA`로 주입한다. 코치만 의도적으로
 기하 모드로 검증할 때는 서버 시작 전에 `COACH_ENGINE=geometry-only`를 설정한다. 기본값 `auto`는
 경량 체크포인트를 사용하고, 체크포인트가 없거나 손상되면 자동으로 geometry-only로 강등한다.

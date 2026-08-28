@@ -48,7 +48,7 @@ export class ApiClient {
     this.config = resolveRuntimeConfig(config);
   }
 
-  async request(action, payload = {}, { signal } = {}) {
+  async request(action, payload = {}, { signal, keepalive = false } = {}) {
     if (this.config.edgeEndpoint && action !== "chars") {
       const headers = { "Content-Type": "application/json" };
       if (this.config.apiKey) {
@@ -60,6 +60,7 @@ export class ApiClient {
         headers,
         body: JSON.stringify({ ...payload, action }),
         signal,
+        keepalive,
       });
       return parseResponse(response);
     }
@@ -88,6 +89,15 @@ export class ApiClient {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+      };
+    } else if (action === "attempt") {
+      url = joinUrl(base, "/attempt/events");
+      init = {
+        ...init,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive,
       };
     } else if (action === "verbalize" || action === "summary") {
       url = joinUrl(base, action === "summary" ? "/coach/summary" : "/coach/verbalize");

@@ -4,14 +4,22 @@
 점 특징 5차원: [x, y, dx, dy, sos(획 시작=1)]
 stroke_ids: 각 점이 속한 획 번호 (획별 풀링용), 패딩은 -1.
 """
+from __future__ import annotations
+
 import glob
 import os
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
 from .kanjivg import parse_svg, normalize_strokes
 from .synth import distort, make_scoring_sample
+
+if TYPE_CHECKING:
+    from .confusion_dataset import ConfusionSample
 
 POINTS_PER_STROKE = 12
 MAX_STROKES = 16
@@ -100,6 +108,60 @@ class ScoringDataset(Dataset):
         return uf, us, tf, ts, labels
 
 
+class CoordinateConfusionDataset(Dataset):
+    """Common confusion samples encoded for the coordinate scorer."""
+
+    def __init__(self, samples: Sequence[ConfusionSample]):
+        self.samples = tuple(samples)
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+        uf, us = featurize(sample.user_strokes)
+        tf, ts = featurize(sample.target_template)
+        return uf, us, tf, ts, sample
+
+
+class RenderedConfusionDataset(Dataset):
+    """Common confusion samples encoded for an image/grid scorer.
+
+    ``renderer`` follows ``strokes_to_inputs(strokes, size)`` and is injected
+    so this shared data module does not import or initialize a vision model.
+    """
+
+    def __init__(
+        self,
+        samples: Sequence[ConfusionSample],
+        renderer: Callable,
+        *,
+        size: int = 448,
+    ):
+        if not callable(renderer):
+            raise TypeError("renderer must be callable")
+        if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+            raise ValueError("size must be a positive integer")
+        self.samples = tuple(samples)
+        self.renderer = renderer
+        self.size = size
+        self._tmpl_cache = {}
+
+    def __len__(self):
+        return len(self.samples)
+
+    def _template_image(self, sample: ConfusionSample):
+        if sample.target_char not in self._tmpl_cache:
+            image, _ = self.renderer(sample.target_template, self.size)
+            self._tmpl_cache[sample.target_char] = image
+        return self._tmpl_cache[sample.target_char]
+
+    def __getitem__(self, idx):
+        sample = self.samples[idx]
+        user_image, user_grid = self.renderer(sample.user_strokes, self.size)
+        return user_image, user_grid, self._template_image(sample), sample
+
+
 def _pad_batch(feat_list, sid_list):
     B = len(feat_list)
     L = max(len(f) for f in feat_list)
@@ -140,3 +202,72 @@ def collate_scoring(batch):
         overall[i] = float(l['overall'])
     return (fu, su, mu), (ft, st_, mt), dict(q=q, rev=rev, ord=ordw,
                                              smask=smask, overall=overall)
+
+
+def collate_confusion_supervision(samples: Sequence[ConfusionSample]):
+    """Tensorize nullable identity/quality labels without losing their masks."""
+    if not samples:
+        raise ValueError("cannot collate an empty confusion batch")
+
+    def masked_float(field: str):
+        values = []
+        mask = []
+        for sample in samples:
+            value = getattr(sample, field)
+            mask.append(value is not None)
+            values.append(0.0 if value is None else float(value))
+        return (
+            torch.tensor(values, dtype=torch.float32),
+            torch.tensor(mask, dtype=torch.bool),
+        )
+
+    is_target, is_target_mask = masked_float("is_target")
+    target_match, target_match_mask = masked_float("target_match")
+    quality, quality_mask = masked_float("quality_for_written_char")
+    labels = {
+        "is_target": is_target,
+        "is_target_mask": is_target_mask,
+        "target_match": target_match,
+        "target_match_mask": target_match_mask,
+        "quality_for_written_char": quality,
+        "quality_mask": quality_mask,
+        "ambiguity": torch.tensor(
+            [sample.ambiguity for sample in samples], dtype=torch.bool
+        ),
+    }
+    metadata = tuple(sample.pair_metadata() for sample in samples)
+    return labels, metadata
+
+
+def collate_coordinate_confusions(batch):
+    """Collate coordinate pairs plus the common confusion supervision."""
+    uf, us, tf, ts, samples = zip(*batch)
+    fu, su, mu = _pad_batch(uf, us)
+    ft, st_, mt = _pad_batch(tf, ts)
+    labels, metadata = collate_confusion_supervision(samples)
+    return (fu, su, mu), (ft, st_, mt), labels, metadata
+
+
+def collate_rendered_confusions(batch):
+    """Collate Chandra-style images/grids with the same pair supervision."""
+    user_images, user_grids, template_images, samples = zip(*batch)
+    batch_size = len(batch)
+    max_strokes = max(grid.shape[0] for grid in user_grids)
+    max_tokens = max(grid.shape[1] for grid in user_grids)
+    grids = torch.zeros(batch_size, max_strokes, max_tokens)
+    stroke_mask = torch.zeros(batch_size, max_strokes, dtype=torch.bool)
+    for index, grid in enumerate(user_grids):
+        strokes, tokens = grid.shape
+        grids[index, :strokes, :tokens] = torch.from_numpy(
+            np.asarray(grid, dtype=np.float32)
+        )
+        stroke_mask[index, :strokes] = True
+    labels, metadata = collate_confusion_supervision(samples)
+    return (
+        list(user_images),
+        grids,
+        list(template_images),
+        stroke_mask,
+        labels,
+        metadata,
+    )

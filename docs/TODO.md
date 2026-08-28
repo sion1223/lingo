@@ -65,12 +65,12 @@ C0 seed baseline은 완료했다. 기존 Chandra/hybrid 품질은 합격하지 �
 
 ### C1 — hard-negative 데이터
 
-- [ ] `written_char`, `target_char`, `competitor`, `is_target`, `pair_id`, ambiguity를 포함한 공통 sample contract
-- [ ] competitor 전체 글자 제출 negative
+- [x] `written_char`, `target_char`, `competitor_char`, `is_target`, `pair_id`, ambiguity를 포함한 공통 sample contract
+- [x] competitor 전체 글자 제출 negative
 - [ ] critical-stroke transplant negative
 - [ ] morph/ambiguous sample과 soft label 정책
 - [ ] model-mined hard-negative queue
-- [ ] train/validation/test seed family 분리 테스트
+- [x] train/validation/test seed family 분리 테스트
 - [ ] 실제 이미지 데이터 writer split
 
 ### C2 — 좌표 기반 스트로크 모델 v2

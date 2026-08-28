@@ -24,8 +24,8 @@ import numpy as np
 import torch
 
 from .chandra_scorer import _score_once, load_chandra_scorer
+from .confusion_dataset import ConfusionSample, confusion_samples_from_fixtures
 from .confusions import (
-    ConfusionFixture,
     fixture_content_sha256,
     fixture_seed_sha256,
     generate_confusion_fixtures,
@@ -484,7 +484,7 @@ def _group_summaries(predictions: Sequence[Mapping], threshold: float) -> dict:
 
 def evaluate_backend(
     backend: LoadedBackend,
-    fixtures: Sequence[ConfusionFixture],
+    samples: Sequence[ConfusionSample],
     templates: Mapping[str, Sequence[np.ndarray]],
     *,
     threshold: float,
@@ -495,11 +495,11 @@ def evaluate_backend(
     if torch.cuda.is_available():
         torch.cuda.reset_peak_memory_stats()
     started = time.perf_counter()
-    for fixture in fixtures:
+    for sample in samples:
         sample_started = time.perf_counter()
-        target_score = backend.score(fixture.strokes, templates[fixture.target_char])
+        target_score = backend.score(sample.user_strokes, sample.target_template)
         competitor_score = backend.score(
-            fixture.strokes, templates[fixture.competitor_char]
+            sample.user_strokes, templates[sample.competitor_char]
         )
         latency_ms = (time.perf_counter() - sample_started) * 1000
         if not (
@@ -513,15 +513,19 @@ def evaluate_backend(
         latencies.append(latency_ms)
         predictions.append(
             {
-                "fixture_id": fixture.fixture_id,
-                "pair_id": fixture.pair_id,
-                "target_char": fixture.target_char,
-                "competitor_char": fixture.competitor_char,
-                "written_char": fixture.written_char,
-                "kind": fixture.kind,
-                "label": fixture.label,
-                "critical_stroke": fixture.critical_stroke,
-                "morph_alpha": fixture.morph_alpha,
+                "fixture_id": sample.sample_id,
+                "pair_id": sample.pair_id,
+                "target_char": sample.target_char,
+                "competitor_char": sample.competitor_char,
+                "written_char": sample.written_char,
+                "kind": sample.kind,
+                "label": sample.label,
+                "critical_stroke": (
+                    sample.critical_strokes[0]
+                    if len(sample.critical_strokes) == 1
+                    else None
+                ),
+                "morph_alpha": sample.morph_alpha,
                 "target_score": round(target_score, 10),
                 "competitor_score": round(competitor_score, 10),
                 "margin": round(margin, 10),
@@ -592,6 +596,11 @@ def evaluate(
     for pair in registry.pairs:
         for char in pair.characters:
             template_loader(char)
+    samples = confusion_samples_from_fixtures(
+        fixtures,
+        registry,
+        template_loader,
+    )
     loaded, statuses = load_backends(
         requested_backends,
         stroke_checkpoint=stroke_checkpoint,
@@ -604,7 +613,7 @@ def evaluate(
         try:
             backends[backend.name] = evaluate_backend(
                 backend,
-                fixtures,
+                samples,
                 template_cache,
                 threshold=threshold,
                 threshold_grid=threshold_grid,

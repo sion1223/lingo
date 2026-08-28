@@ -369,6 +369,12 @@ interpolation 샘플을 무조건 target 또는 competitor로 라벨링하지 �
 
 `written_char`와 `target_char`가 같은 positive뿐 아니라 다른 hard negative를 같은 batch에 넣는다.
 
+구현 계약은 `scorer/confusion_dataset.py`와
+`configs/confusions/sample.schema.json`의 `confusion_sample.v1`이다. 판별이 끝난
+샘플은 `written_char`와 `is_target`을 함께 기록하고, morph 경계처럼 아직 판별하지
+않은 샘플은 두 필드를 `null`로 유지한다. 기존 fixture에 없는 품질 라벨은 임의로
+추정하지 않고 `quality_for_written_char=null`로 둔다.
+
 ### 5.2 negative 유형
 
 #### A. Full-character hard negative
@@ -1239,7 +1245,7 @@ raw checkpoints, caches, ETL 원본, 전체 prediction dump는 Git에 넣지 않
 
 ### C1 — hard-negative data foundation
 
-- [ ] 공통 sample contract
+- [x] 공통 sample contract
 - [ ] full competitor substitution
 - [ ] critical-stroke transplant
 - [ ] ambiguity/morph sample
