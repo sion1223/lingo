@@ -268,7 +268,8 @@ export function computeStrokeMetrics(userPoints, templatePoints, options = {}) {
     pathError,
     shapeError: alignedMeanDistance(centeredUser, centeredTemplate, forward.path),
     directionCosine: direction,
-    lengthRatio: strokeArcLength(rawUser) / Math.max(strokeArcLength(rawTemplate), EPSILON),
+    // Fixed-density paths keep high-rate pen jitter from becoming fake length.
+    lengthRatio: strokeArcLength(user) / Math.max(strokeArcLength(template), EPSILON),
     bboxShift: {
       dx: templateBox.center[0] - userBox.center[0],
       dy: templateBox.center[1] - userBox.center[1],
@@ -331,4 +332,3 @@ export function toLegacyStroke(points) {
 export function toLegacyStrokes(strokes) {
   return strokes.map((stroke) => toLegacyStroke(stroke));
 }
-

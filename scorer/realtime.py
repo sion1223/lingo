@@ -288,7 +288,8 @@ def compute_stroke_metrics(user_points: Sequence, template_points: Sequence) -> 
         path_error=path_error,
         shape_error=shape_error,
         direction_cosine=direction,
-        length_ratio=_arc_length(raw_user) / max(_arc_length(raw_template), EPSILON),
+        # Fixed-density paths keep high-rate pen jitter from becoming fake length.
+        length_ratio=_arc_length(user) / max(_arc_length(template), EPSILON),
         bbox_shift=(float(bbox_vector[0]), float(bbox_vector[1])),
         scale_ratio=user_diagonal / max(template_diagonal, EPSILON),
         curvature_difference=max(curvature_difference, 0.0),

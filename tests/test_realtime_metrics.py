@@ -39,6 +39,26 @@ def test_metrics_separate_position_shape_direction_and_length():
     assert short_metrics.length_ratio == pytest.approx(0.5)
 
 
+def test_dense_mobile_pen_sampling_does_not_inflate_stroke_length():
+    template = line()
+    samples = 141
+    dense_pen_stroke = np.asarray(
+        [
+            [
+                0.1 + 0.8 * index / (samples - 1),
+                0.2 + (-0.004 if index % 2 == 0 else 0.004),
+            ]
+            for index in range(samples)
+        ],
+        dtype=np.float64,
+    )
+
+    metrics = compute_stroke_metrics(dense_pen_stroke, template)
+
+    assert metrics.shape_error < 0.01
+    assert 0.95 <= metrics.length_ratio <= 1.1
+
+
 def test_legacy_and_rich_points_have_identical_geometry():
     legacy = line().tolist()
     rich = [

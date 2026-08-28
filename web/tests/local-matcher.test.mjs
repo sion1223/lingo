@@ -123,6 +123,31 @@ test("legacy arrays and rich points produce the same geometry", () => {
   assert.equal(fromRich.metrics.directionCosine, fromLegacy.metrics.directionCosine);
 });
 
+test("dense mobile pen sampling does not turn a matching stroke into TOO_LONG", () => {
+  const template = Array.from({ length: 12 }, (_, index) => [
+    0.1 + 0.8 * index / 11,
+    0.2,
+  ]);
+  const mobileStroke = Array.from({ length: 141 }, (_, index) => ({
+    x: 0.1 + 0.8 * index / 140,
+    y: 0.2 + (index % 2 === 0 ? -0.004 : 0.004),
+    t: index * 4,
+    pressure: 0.5,
+    pointerType: "pen",
+  }));
+
+  const result = analyzeCompletedStroke({
+    stroke: mobileStroke,
+    templateStrokes: [template],
+    expectedTemplateIndex: 0,
+  });
+
+  assert.ok(result.metrics.shapeError < 0.01);
+  assert.equal(result.primaryCue, null);
+  assert.equal(result.accepted, true);
+  assert.equal(result.nextAction.type, "complete");
+});
+
 test("invalid and degenerate strokes fail safely", () => {
   const fixture = fixtures.characters.日;
   for (const stroke of [
