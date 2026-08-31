@@ -111,6 +111,28 @@
   </div>
   </main>
 
-  <script type="module" src="/web/app.js?v=__LINGO_WEB_ASSET_VERSION__"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "/web/api.js": "/web/api.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/app.js": "/web/app.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/attempt-log.js": "/web/attempt-log.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/character-picker.js": "/web/character-picker.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/builtin-templates.js": "/web/coach/builtin-templates.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/controller.js": "/web/coach/controller.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/local-matcher.js": "/web/coach/local-matcher.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/metrics.js": "/web/coach/metrics.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/overlay.js": "/web/coach/overlay.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/pointer-boundary.js": "/web/coach/pointer-boundary.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/policy.js": "/web/coach/policy.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/server-refinement.js": "/web/coach/server-refinement.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/stroke-direction.js": "/web/coach/stroke-direction.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/teacher-feedback.js": "/web/coach/teacher-feedback.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/coach/template-fit.js": "/web/coach/template-fit.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/local-attempt-store.js": "/web/local-attempt-store.js?v=__LINGO_WEB_ASSET_VERSION__"
+      }
+    }
+  </script>
+  <script type="module">import "/web/app.js";</script>
 </body>
 </html>
