@@ -80,9 +80,13 @@ python -m uvicorn scorer.server:app --host 127.0.0.1 --port 8000
 
 ```bash
 python scripts/update_kanji_readings.py
+python scripts/update_kanji_catalog.py
 ```
 
 `web/data/KANJIDIC2-NOTICE.md`의 출처·라이선스·월별 갱신 조건을 유지한다.
+문자 선택창은 교육한자 1,026자를 1~6학년 순서로 먼저 보여 주고, 나머지 상용한자
+1,110자를 뒤에 배치한다. 같은 학년에서는 획수와 사용빈도를, 나머지 상용한자에서는
+사용빈도와 획수를 차례로 반영한다.
 
 브라우저는 채점, 전체 지우기, 문자 변경, 페이지 종료 시 필기 시도를 한 번의 배치로
 `POST /attempt/events` 또는 Edge의 `action: "attempt"`에 보낸다. 최종 획뿐 아니라 되돌린

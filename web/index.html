@@ -38,6 +38,13 @@
     <button class="quick" type="button">語</button>
   </div>
 
+  <div id="stroke-direction-legend">
+    <svg viewBox="0 0 28 16" aria-hidden="true">
+      <path d="M2 8h19M16 3l6 5-6 5"></path>
+    </svg>
+    <span>획 번호에서 화살표 방향으로 쓰세요.</span>
+  </div>
+
   <div id="wrap">
     <canvas id="cv" aria-label="한자 필기 영역"></canvas>
     <canvas id="coach-cv" aria-hidden="true"></canvas>
@@ -87,12 +94,25 @@
         >
         <button id="picker-close" type="button">닫기</button>
       </div>
+      <div id="picker-categories" aria-label="한자 학년 분류">
+        <button type="button" data-category="ALL" aria-pressed="true">전체</button>
+        <button type="button" data-category="G1" aria-pressed="false">초1</button>
+        <button type="button" data-category="G2" aria-pressed="false">초2</button>
+        <button type="button" data-category="G3" aria-pressed="false">초3</button>
+        <button type="button" data-category="G4" aria-pressed="false">초4</button>
+        <button type="button" data-category="G5" aria-pressed="false">초5</button>
+        <button type="button" data-category="G6" aria-pressed="false">초6</button>
+        <button type="button" data-category="JOYO" aria-pressed="false">기타 상용</button>
+        <button type="button" data-category="KANA" aria-pressed="false">가나</button>
+        <button type="button" data-category="OTHER" aria-pressed="false">기타</button>
+      </div>
       <div id="picker-grid" role="listbox" aria-label="검색 결과"></div>
       <div id="picker-info" aria-live="polite"></div>
       <div id="picker-source">
-        한자 읽기: <a href="https://www.edrdg.org/wiki/index.php/KANJIDIC_Project"
+        학년·획수·사용빈도·한자 읽기:
+        <a href="https://www.edrdg.org/wiki/index.php/KANJIDIC_Project"
           target="_blank" rel="noreferrer">EDRDG KANJIDIC2</a>
-        · 입력을 마친 뒤 Enter로 확정
+        · 교육한자 1~6학년 뒤에 나머지 상용한자 표시 · Enter로 확정
       </div>
     </div>
   </div>

@@ -6,7 +6,15 @@ import {
   markLastStrokeUndone,
   shouldAutoRetryStroke,
 } from "./attempt-log.js";
-import { CharacterPickerModel, splitCharacters } from "./character-picker.js";
+import {
+  CHARACTER_CATEGORY_LABELS,
+  CharacterPickerModel,
+  categoryForCharacter,
+  createCatalogIndex,
+  primaryRomaji,
+  sortCharactersByCatalog,
+  splitCharacters,
+} from "./character-picker.js";
 import { BUILTIN_TEMPLATES, getBuiltinTemplate } from "./coach/builtin-templates.js";
 import { LocalCoachController, TUTOR_STATES } from "./coach/controller.js";
 import { toLegacyStrokes } from "./coach/local-matcher.js";
@@ -14,6 +22,7 @@ import { clamp, distance, toXY } from "./coach/metrics.js";
 import { CoachOverlay } from "./coach/overlay.js";
 import { bindStrokeEndEvents } from "./coach/pointer-boundary.js";
 import { fitTemplateToWriting } from "./coach/template-fit.js";
+import { strokeDirectionMarker } from "./coach/stroke-direction.js";
 import {
   buildCoachPayload,
   chooseHigherConfidence,
@@ -59,6 +68,7 @@ const elements = {
   pickerGrid: document.getElementById("picker-grid"),
   pickerInfo: document.getElementById("picker-info"),
   pickerSearch: document.getElementById("picker-search"),
+  pickerCategories: document.getElementById("picker-categories"),
   localHistoryCount: document.getElementById("local-history-count"),
   localHistoryList: document.getElementById("local-history-list"),
   localHistoryStatus: document.getElementById("local-history-status"),
@@ -89,6 +99,8 @@ let allCharacters = splitCharacters(Object.keys(BUILTIN_TEMPLATES));
 let visibleCharacters = [...allCharacters];
 let shownCharacters = 0;
 let characterCatalogPromise = null;
+let characterCatalogIndex = Object.create(null);
+let characterReadingIndex = Object.create(null);
 let pickerComposing = false;
 let teacherNetworkAvailable = false;
 let currentTeacherContext = null;
@@ -97,6 +109,7 @@ let repeatedErrorCount = 0;
 const characterChunkSize = 400;
 const pickerModel = new CharacterPickerModel(allCharacters);
 const readingIndexUrl = new URL("./data/kanji-readings.json", import.meta.url);
+const characterCatalogUrl = new URL("./data/kanji-catalog.json", import.meta.url);
 
 function identity(prefix) {
   if (globalThis.crypto?.randomUUID) return `${prefix}-${globalThis.crypto.randomUUID()}`;
@@ -387,6 +400,39 @@ function drawStroke(points, color, width, dash = []) {
   inkContext.setLineDash([]);
 }
 
+function drawStrokeDirection(points) {
+  const marker = strokeDirectionMarker(points);
+  if (!marker) return;
+  const [tailX, tailY] = marker.tail.map((value) => value * canvasSize);
+  const [tipX, tipY] = marker.tip.map((value) => value * canvasSize);
+  const headLength = Math.max(6, Math.min(9, canvasSize * 0.017));
+  const headSpread = 0.58;
+
+  inkContext.save();
+  inkContext.strokeStyle = "rgba(23, 92, 211, 0.9)";
+  inkContext.fillStyle = "rgba(23, 92, 211, 0.9)";
+  inkContext.lineWidth = 2.2;
+  inkContext.lineCap = "round";
+  inkContext.setLineDash([]);
+  inkContext.beginPath();
+  inkContext.moveTo(tailX, tailY);
+  inkContext.lineTo(tipX, tipY);
+  inkContext.stroke();
+  inkContext.beginPath();
+  inkContext.moveTo(tipX, tipY);
+  inkContext.lineTo(
+    tipX - Math.cos(marker.angle - headSpread) * headLength,
+    tipY - Math.sin(marker.angle - headSpread) * headLength,
+  );
+  inkContext.lineTo(
+    tipX - Math.cos(marker.angle + headSpread) * headLength,
+    tipY - Math.sin(marker.angle + headSpread) * headLength,
+  );
+  inkContext.closePath();
+  inkContext.fill();
+  inkContext.restore();
+}
+
 function qualityColor(quality) {
   if (quality > 0.7) return "#128a44";
   if (quality > 0.4) return "#9a6700";
@@ -430,6 +476,9 @@ function redrawInk() {
     const visibleCount = stage === 1 ? template.length : Math.min(revealCount, template.length);
     for (let index = 0; index < visibleCount; index += 1) {
       drawStroke(referenceTemplate[index], "#d8d3c8", 7);
+    }
+    for (let index = 0; index < visibleCount; index += 1) {
+      drawStrokeDirection(referenceTemplate[index]);
     }
     for (let index = 0; index < visibleCount; index += 1) {
       const [x, y] = toXY(referenceTemplate[index][0]);
@@ -973,23 +1022,49 @@ function renderCharacterChunk() {
   const end = Math.min(shownCharacters + characterChunkSize, visibleCharacters.length);
   const fragment = document.createDocumentFragment();
   for (let index = shownCharacters; index < end; index += 1) {
+    const character = visibleCharacters[index];
+    const metadata = characterCatalogIndex[character];
+    const category = categoryForCharacter(character, characterCatalogIndex);
+    const reading = primaryRomaji(character, characterReadingIndex);
     const item = document.createElement("div");
     item.className = "pchar";
     item.id = `picker-option-${index}`;
     item.setAttribute("role", "option");
     item.dataset.index = String(index);
-    item.dataset.character = visibleCharacters[index];
-    item.textContent = visibleCharacters[index];
+    item.dataset.character = character;
     item.setAttribute("aria-selected", String(index === pickerModel.activeIndex));
+    const description = [
+      character,
+      reading,
+      CHARACTER_CATEGORY_LABELS[category],
+      metadata?.strokes ? `${metadata.strokes}획` : "",
+      metadata?.frequency ? `사용빈도 ${metadata.frequency}위` : "",
+    ].filter(Boolean).join(", ");
+    item.setAttribute("aria-label", description);
+    item.title = description;
+
+    const glyph = document.createElement("span");
+    glyph.className = "pchar-glyph";
+    glyph.textContent = character;
+    const romanized = document.createElement("span");
+    romanized.className = "pchar-reading";
+    romanized.textContent = reading || "—";
+    const classification = document.createElement("span");
+    classification.className = "pchar-category";
+    classification.textContent = category === "JOYO"
+      ? "상용"
+      : CHARACTER_CATEGORY_LABELS[category];
+    item.append(glyph, romanized, classification);
     if (index === pickerModel.activeIndex) item.classList.add("active");
     fragment.appendChild(item);
   }
   elements.pickerGrid.appendChild(fragment);
   shownCharacters = end;
   const query = elements.pickerSearch.value.trim();
+  const categoryLabel = CHARACTER_CATEGORY_LABELS[pickerModel.category];
   elements.pickerInfo.textContent = query
-    ? `${visibleCharacters.length}개 검색 결과 · Enter로 확정`
-    : `${shownCharacters} / ${visibleCharacters.length}자 (스크롤하면 더 표시)`;
+    ? `${categoryLabel} · ${visibleCharacters.length}개 검색 결과 · Enter로 확정`
+    : `${categoryLabel} · ${shownCharacters} / ${visibleCharacters.length}자 (스크롤하면 더 표시)`;
 }
 
 function resetCharacterGrid(characters = pickerModel.matches) {
@@ -1026,6 +1101,15 @@ function refreshPickerSearch() {
   renderActivePickerResult();
 }
 
+function refreshPickerCategoryButtons() {
+  for (const button of elements.pickerCategories.querySelectorAll("button[data-category]")) {
+    button.setAttribute(
+      "aria-pressed",
+      String(button.dataset.category === pickerModel.category),
+    );
+  }
+}
+
 function commitPickerCharacter(character) {
   if (!character) return;
   elements.character.value = character;
@@ -1043,24 +1127,33 @@ async function loadCharacterCatalog() {
       if (!response.ok) throw new Error("reading index unavailable");
       return response.json();
     }),
-  ]).then(([catalog, readings]) => {
-    const serverCharacters = catalog.status === "fulfilled"
-      && catalog.value.status === 200
-      && typeof catalog.value.body.chars === "string"
-      ? splitCharacters(catalog.value.body.chars)
+    fetch(characterCatalogUrl).then(async (response) => {
+      if (!response.ok) throw new Error("character catalog unavailable");
+      return response.json();
+    }),
+  ]).then(([serverCatalog, readings, kanjiCatalog]) => {
+    const serverCharacters = serverCatalog.status === "fulfilled"
+      && serverCatalog.value.status === 200
+      && typeof serverCatalog.value.body.chars === "string"
+      ? splitCharacters(serverCatalog.value.body.chars)
       : [];
     const indexedKanji = readings.status === "fulfilled"
       ? Object.keys(readings.value.readings ?? {})
       : [];
-    allCharacters = splitCharacters([
+    characterCatalogIndex = kanjiCatalog.status === "fulfilled"
+      ? createCatalogIndex(kanjiCatalog.value.entries ?? [])
+      : Object.create(null);
+    characterReadingIndex = readings.status === "fulfilled"
+      ? readings.value.readings ?? {}
+      : Object.create(null);
+    allCharacters = sortCharactersByCatalog([
       ...serverCharacters,
       ...indexedKanji,
       ...Object.keys(BUILTIN_TEMPLATES),
-    ]);
+    ], characterCatalogIndex);
+    pickerModel.setCatalogIndex(characterCatalogIndex);
     pickerModel.setCharacters(allCharacters);
-    if (readings.status === "fulfilled") {
-      pickerModel.setReadingIndex(readings.value.readings ?? {});
-    }
+    pickerModel.setReadingIndex(characterReadingIndex);
     refreshPickerSearch();
   });
   return characterCatalogPromise;
@@ -1082,8 +1175,17 @@ elements.picker.addEventListener("click", (event) => {
 });
 
 elements.pickerGrid.addEventListener("click", (event) => {
-  if (!event.target.classList.contains("pchar")) return;
-  commitPickerCharacter(event.target.dataset.character || event.target.textContent);
+  const item = event.target.closest(".pchar");
+  if (!item || !elements.pickerGrid.contains(item)) return;
+  commitPickerCharacter(item.dataset.character);
+});
+
+elements.pickerCategories.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-category]");
+  if (!button || !elements.pickerCategories.contains(button)) return;
+  resetCharacterGrid(pickerModel.setCategory(button.dataset.category));
+  refreshPickerCategoryButtons();
+  renderActivePickerResult();
 });
 
 elements.pickerGrid.addEventListener("scroll", () => {

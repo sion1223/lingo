@@ -1,6 +1,32 @@
 const JAPANESE_READING_SEPARATORS = /[.\-‐‑‒–—・･\s]/gu;
 const ROMAJI_QUERY = /^[a-zāīūēō'\-\s]+$/iu;
 
+export const CHARACTER_CATEGORIES = Object.freeze([
+  "ALL",
+  "G1",
+  "G2",
+  "G3",
+  "G4",
+  "G5",
+  "G6",
+  "JOYO",
+  "KANA",
+  "OTHER",
+]);
+
+export const CHARACTER_CATEGORY_LABELS = Object.freeze({
+  ALL: "전체",
+  G1: "초1",
+  G2: "초2",
+  G3: "초3",
+  G4: "초4",
+  G5: "초5",
+  G6: "초6",
+  JOYO: "기타 상용",
+  KANA: "가나",
+  OTHER: "기타",
+});
+
 const DIGRAPHS = Object.freeze({
   きゃ: "kya", きゅ: "kyu", きょ: "kyo",
   ぎゃ: "gya", ぎゅ: "gyu", ぎょ: "gyo",
@@ -112,10 +138,82 @@ export function splitCharacters(value) {
   return result;
 }
 
+export function isKana(value) {
+  const character = [...String(value ?? "").normalize("NFKC")][0];
+  if (!character) return false;
+  const codepoint = character.codePointAt(0);
+  return (
+    (codepoint >= 0x3040 && codepoint <= 0x30ff)
+    || (codepoint >= 0x31f0 && codepoint <= 0x31ff)
+  );
+}
+
+export function createCatalogIndex(entries = []) {
+  const index = Object.create(null);
+  for (const [order, entry] of entries.entries()) {
+    const character = splitCharacters(entry?.character)[0];
+    if (!character || index[character]) continue;
+    index[character] = {
+      grade: Number(entry.grade),
+      strokes: Number(entry.strokes),
+      frequency: entry.frequency == null ? null : Number(entry.frequency),
+      order,
+    };
+  }
+  return index;
+}
+
+export function categoryForCharacter(character, catalogIndex = {}) {
+  const grade = Number(catalogIndex?.[character]?.grade);
+  if (grade >= 1 && grade <= 6) return `G${grade}`;
+  if (grade === 8) return "JOYO";
+  if (isKana(character)) return "KANA";
+  return "OTHER";
+}
+
+export function filterCharactersByCategory(
+  characters,
+  category = "ALL",
+  catalogIndex = {},
+) {
+  const source = splitCharacters(characters);
+  if (category === "ALL") return source;
+  return source.filter(
+    (character) => categoryForCharacter(character, catalogIndex) === category,
+  );
+}
+
+export function sortCharactersByCatalog(characters, catalogIndex = {}) {
+  return splitCharacters(characters)
+    .map((character, originalIndex) => {
+      const catalogOrder = Number(catalogIndex?.[character]?.order);
+      const category = categoryForCharacter(character, catalogIndex);
+      return {
+        character,
+        originalIndex,
+        group: Number.isFinite(catalogOrder) ? 0 : category === "KANA" ? 1 : 2,
+        catalogOrder: Number.isFinite(catalogOrder) ? catalogOrder : originalIndex,
+      };
+    })
+    .sort((left, right) => (
+      left.group - right.group
+      || left.catalogOrder - right.catalogOrder
+      || left.originalIndex - right.originalIndex
+    ))
+    .map(({ character }) => character);
+}
+
 function readingValues(readingIndex, character) {
   const values = readingIndex?.[character];
   if (Array.isArray(values)) return values;
   return typeof values === "string" ? [values] : [];
+}
+
+export function primaryRomaji(character, readingIndex = {}) {
+  const reading = isKana(character)
+    ? character
+    : readingValues(readingIndex, character)[0];
+  return reading ? kanaToRomaji(reading) : "";
 }
 
 function queryMatchRank(character, query, readingIndex) {
@@ -165,9 +263,11 @@ export function searchCharacters(query, characters, readingIndex = {}) {
 }
 
 export class CharacterPickerModel {
-  constructor(characters = [], readingIndex = {}) {
+  constructor(characters = [], readingIndex = {}, catalogIndex = {}) {
     this.characters = splitCharacters(characters);
     this.readingIndex = readingIndex;
+    this.catalogIndex = catalogIndex;
+    this.category = "ALL";
     this.query = "";
     this.matches = [...this.characters];
     this.activeIndex = 0;
@@ -176,17 +276,36 @@ export class CharacterPickerModel {
 
   setCharacters(characters) {
     this.characters = splitCharacters(characters);
-    return this.setQuery(this.query);
+    return this.refresh();
   }
 
   setReadingIndex(readingIndex = {}) {
     this.readingIndex = readingIndex;
-    return this.setQuery(this.query);
+    return this.refresh();
+  }
+
+  setCatalogIndex(catalogIndex = {}) {
+    this.catalogIndex = catalogIndex;
+    return this.refresh();
+  }
+
+  setCategory(category = "ALL") {
+    this.category = CHARACTER_CATEGORIES.includes(category) ? category : "ALL";
+    return this.refresh();
   }
 
   setQuery(query) {
     this.query = String(query ?? "");
-    this.matches = searchCharacters(this.query, this.characters, this.readingIndex);
+    return this.refresh();
+  }
+
+  refresh() {
+    const searched = searchCharacters(this.query, this.characters, this.readingIndex);
+    this.matches = filterCharactersByCategory(
+      searched,
+      this.category,
+      this.catalogIndex,
+    );
     this.activeIndex = 0;
     return [...this.matches];
   }
