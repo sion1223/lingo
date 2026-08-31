@@ -92,27 +92,6 @@ button:focus-visible, input:focus-visible { outline: 3px solid #84adff; outline-
   font-size: 18px;
 }
 
-#stroke-direction-legend {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: min(100%, 520px);
-  margin: -2px 0 8px;
-  color: #5f5a52;
-  font-size: 12px;
-}
-
-#stroke-direction-legend svg {
-  flex: 0 0 28px;
-  width: 28px;
-  height: 16px;
-  fill: none;
-  stroke: #175cd3;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
-}
-
 #wrap {
   position: relative;
   isolation: isolate;

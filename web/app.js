@@ -400,18 +400,28 @@ function drawStroke(points, color, width, dash = []) {
   inkContext.setLineDash([]);
 }
 
-function drawStrokeDirection(points) {
-  const marker = strokeDirectionMarker(points);
+function drawStrokeOrderGuide(
+  points,
+  order,
+  { color = "rgba(96, 103, 113, 0.24)", width = 7, dash = [] } = {},
+) {
+  drawStroke(points, color, width, dash);
+  const marker = strokeDirectionMarker(points, 0.78);
   if (!marker) return;
+
   const [tailX, tailY] = marker.tail.map((value) => value * canvasSize);
   const [tipX, tipY] = marker.tip.map((value) => value * canvasSize);
+  const [rawStartX, rawStartY] = toXY(points[0]).map((value) => value * canvasSize);
+  const badgeRadius = Math.max(6.5, Math.min(9, canvasSize * 0.017));
+  const startX = clamp(rawStartX, badgeRadius + 1, canvasSize - badgeRadius - 1);
+  const startY = clamp(rawStartY, badgeRadius + 1, canvasSize - badgeRadius - 1);
   const headLength = Math.max(6, Math.min(9, canvasSize * 0.017));
   const headSpread = 0.58;
 
   inkContext.save();
-  inkContext.strokeStyle = "rgba(23, 92, 211, 0.9)";
-  inkContext.fillStyle = "rgba(23, 92, 211, 0.9)";
-  inkContext.lineWidth = 2.2;
+  inkContext.strokeStyle = "rgba(23, 92, 211, 0.88)";
+  inkContext.fillStyle = "rgba(23, 92, 211, 0.88)";
+  inkContext.lineWidth = Math.max(2.2, width * 0.42);
   inkContext.lineCap = "round";
   inkContext.setLineDash([]);
   inkContext.beginPath();
@@ -430,6 +440,19 @@ function drawStrokeDirection(points) {
   );
   inkContext.closePath();
   inkContext.fill();
+
+  inkContext.beginPath();
+  inkContext.arc(startX, startY, badgeRadius, 0, Math.PI * 2);
+  inkContext.fillStyle = "rgba(255, 255, 255, 0.94)";
+  inkContext.fill();
+  inkContext.strokeStyle = "rgba(23, 92, 211, 0.88)";
+  inkContext.lineWidth = 1.4;
+  inkContext.stroke();
+  inkContext.fillStyle = "#174b9b";
+  inkContext.font = `700 ${Math.max(9, Math.min(12, badgeRadius * 1.25))}px sans-serif`;
+  inkContext.textAlign = "center";
+  inkContext.textBaseline = "middle";
+  inkContext.fillText(String(order), startX, startY + 0.5);
   inkContext.restore();
 }
 
@@ -450,8 +473,12 @@ function completedRecallWriting() {
 }
 
 function drawCompletedRecallReference(referenceTemplate) {
-  for (const referenceStroke of referenceTemplate) {
-    drawStroke(referenceStroke, "rgba(23, 92, 211, 0.72)", 3, [8, 6]);
+  for (let index = 0; index < referenceTemplate.length; index += 1) {
+    drawStrokeOrderGuide(referenceTemplate[index], index + 1, {
+      color: "rgba(23, 92, 211, 0.48)",
+      width: 3,
+      dash: [8, 6],
+    });
   }
 }
 
@@ -475,16 +502,7 @@ function redrawInk() {
   if (referenceTemplate) {
     const visibleCount = stage === 1 ? template.length : Math.min(revealCount, template.length);
     for (let index = 0; index < visibleCount; index += 1) {
-      drawStroke(referenceTemplate[index], "#d8d3c8", 7);
-    }
-    for (let index = 0; index < visibleCount; index += 1) {
-      drawStrokeDirection(referenceTemplate[index]);
-    }
-    for (let index = 0; index < visibleCount; index += 1) {
-      const [x, y] = toXY(referenceTemplate[index][0]);
-      inkContext.fillStyle = "#766f63";
-      inkContext.font = "12px sans-serif";
-      inkContext.fillText(String(index + 1), x * canvasSize + 4, y * canvasSize - 4);
+      drawStrokeOrderGuide(referenceTemplate[index], index + 1);
     }
   }
 
