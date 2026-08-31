@@ -48,6 +48,8 @@ WEB_DIR = ROOT_DIR / 'web'
 LOGGER = logging.getLogger(__name__)
 PROTOCOL_VERSION = 1
 BUILD_SHA = os.environ.get('BUILD_SHA', 'unknown').strip() or 'unknown'
+WEB_ASSET_VERSION = hashlib.sha256(BUILD_SHA.encode('utf-8')).hexdigest()[:12]
+WEB_ASSET_VERSION_PLACEHOLDER = '__LINGO_WEB_ASSET_VERSION__'
 COACH_ENGINE_MODE = os.environ.get('COACH_ENGINE', 'auto').strip().lower()
 if COACH_ENGINE_MODE not in {'auto', 'geometry-only'}:
     LOGGER.warning('unknown COACH_ENGINE=%r; using auto', COACH_ENGINE_MODE)
@@ -413,6 +415,16 @@ async def lifespan(_app):
 app = FastAPI(title='lingo-kanji-scorer', lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=['*'],
                    allow_methods=['*'], allow_headers=['*'])
+
+
+@app.middleware('http')
+async def disable_web_asset_cache(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path == '/' or request.url.path.startswith('/web/'):
+        response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 app.mount('/web', StaticFiles(directory=WEB_DIR, html=True), name='web')
 
 
@@ -456,7 +468,9 @@ def _sanitize(report):
 @app.get('/')
 def index():
     from fastapi.responses import HTMLResponse
-    return HTMLResponse((WEB_DIR / 'index.html').read_text(encoding='utf-8'))
+    html = (WEB_DIR / 'index.html').read_text(encoding='utf-8')
+    html = html.replace(WEB_ASSET_VERSION_PLACEHOLDER, WEB_ASSET_VERSION)
+    return HTMLResponse(html)
 
 
 _chars_cache = None
