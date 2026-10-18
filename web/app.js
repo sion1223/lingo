@@ -1,4 +1,6 @@
 import { ApiClient } from "./api.js";
+import { allowsRemoteScoring, practiceForm } from "./learning.js";
+import { LearningPanel } from "./learning-panel.js";
 import {
   applyServerStrokeResult,
   buildAttemptPayload,
@@ -89,6 +91,10 @@ let currentPointerId = null;
 let strokeStartTimestamp = 0;
 let template = null;
 let templateCharacter = "";
+let templateVariant = "default";
+let templateDisplay = null;
+let learningPack = null;
+let learningEntryId = null;
 let lastReport = null;
 let penSeen = false;
 let stage = 1;
@@ -110,6 +116,36 @@ const characterChunkSize = 400;
 const pickerModel = new CharacterPickerModel(allCharacters);
 const readingIndexUrl = new URL("./data/kanji-readings.json", import.meta.url);
 const characterCatalogUrl = new URL("./data/kanji-catalog.json", import.meta.url);
+const studyToggle = document.getElementById("study-toggle");
+const studySettings = document.getElementById("study-settings");
+const studySurface = document.getElementById("study-surface");
+
+function updatePracticeSummary() {
+  document.getElementById("active-character").textContent = templateCharacter || currentCharacter() || "—";
+  document.getElementById("active-mode").textContent = (stage === 1 ? "따라쓰기" : "암기쓰기")
+    + (templateVariant === "default" ? "" : " · 대체 자형");
+}
+
+function setStudySettingsOpen(open, { focusWriting = false } = {}) {
+  if (!open && (focusWriting || studySettings.contains(document.activeElement))) {
+    (focusWriting ? elements.canvas : studyToggle).focus({ preventScroll: true });
+  }
+  studySettings.hidden = !open;
+  studySettings.inert = !open;
+  studySettings.setAttribute("aria-hidden", String(!open));
+  studyToggle.setAttribute("aria-expanded", String(open));
+  document.getElementById("study-toggle-label").textContent = open ? "학습·설정 닫기" : "학습·설정 열기";
+  if (!open && focusWriting) document.getElementById("practice-workspace").scrollIntoView({ block: "start" });
+}
+
+studyToggle.addEventListener("click", () => setStudySettingsOpen(studySettings.hidden));
+document.getElementById("study-done").addEventListener("click", () => setStudySettingsOpen(false, { focusWriting: true }));
+studySettings.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !event.isComposing) {
+    event.preventDefault();
+    setStudySettingsOpen(false);
+  }
+});
 
 function identity(prefix) {
   if (globalThis.crypto?.randomUUID) return `${prefix}-${globalThis.crypto.randomUUID()}`;
@@ -151,7 +187,7 @@ function localAttemptRecord({
     return null;
   }
   const savedAt = endedAt || new Date().toISOString();
-  return buildLocalAttemptRecord({
+  return { ...buildLocalAttemptRecord({
     sessionId,
     attemptId,
     attemptRevision: coach.lifecycle.revision,
@@ -164,7 +200,7 @@ function localAttemptRecord({
     endedReason,
     endedAt,
     finalScore,
-  });
+  }), template_variant: templateVariant, learning_entry_id: learningEntryId };
 }
 
 function formatLocalAttemptTime(value) {
@@ -209,6 +245,7 @@ function renderLocalHistory(count, records) {
     const removedLabel = removed > 0 ? ` · 다시 쓴 획 ${removed}` : "";
     const state = record.status === "finished" ? "완료" : "작성 중";
     details.textContent = `${state} · 입력 ${attempts}획${removedLabel}${score}`
+      + (record.template_variant && record.template_variant !== "default" ? " · 대체 자형 · 로컬 교정" : "")
       + ` · ${formatLocalAttemptTime(record.updated_at)}`;
     item.append(character, details);
     fragment.appendChild(item);
@@ -324,6 +361,7 @@ function diagnosisWithServerEvidence(body, diagnosis) {
 
 function prepareTeacherExplanation(diagnosis, { countAttempt = true } = {}) {
   clearTeacherState({ clearContext: true });
+  if (!allowsRemoteScoring(templateVariant)) return;
   const errorCode = diagnosis?.primaryCue?.code;
   if (!errorCode) return;
 
@@ -360,6 +398,7 @@ function prepareTeacherExplanation(diagnosis, { countAttempt = true } = {}) {
 
 function setStage(nextStage) {
   stage = nextStage;
+  document.getElementById("practice-mode").value = String(stage);
   revealCount = 0;
   const mode = stage === 1 ? "trace" : "recall";
   coach.setMode(mode);
@@ -368,10 +407,11 @@ function setStage(nextStage) {
     stage === 1 ? "1단계: 궤적 따라쓰기" : "2단계: 위치 자유 · 모양 쓰기"
   );
   elements.hint.hidden = stage !== 2;
+  updatePracticeSummary();
 }
 
 function configureCanvases() {
-  canvasSize = Math.min(window.innerWidth - 32, 520);
+  canvasSize = Math.min(document.getElementById("practice-workspace").clientWidth, 520);
   const devicePixelRatio = window.devicePixelRatio || 1;
   elements.canvas.width = Math.round(canvasSize * devicePixelRatio);
   elements.canvas.height = Math.round(canvasSize * devicePixelRatio);
@@ -403,9 +443,22 @@ function drawStroke(points, color, width, dash = []) {
 function drawStrokeOrderGuide(
   points,
   order,
-  { color = "rgba(96, 103, 113, 0.24)", width = 7, dash = [] } = {},
+  { color = "rgba(96, 103, 113, 0.24)", width = 7, dash = [], displayPath = null } = {},
 ) {
-  drawStroke(points, color, width, dash);
+  if (displayPath && templateDisplay && typeof Path2D !== "undefined") {
+    // Draw the real curve in the same frame as the 12-point scoring template.
+    // Font glyphs never enter this canvas or the coach's stroke data.
+    inkContext.save();
+    inkContext.translate(templateDisplay.offset[0] * canvasSize, templateDisplay.offset[1] * canvasSize);
+    const scale = templateDisplay.scale * canvasSize;
+    inkContext.scale(scale, scale);
+    inkContext.strokeStyle = color;
+    inkContext.lineWidth = width / scale;
+    inkContext.stroke(new Path2D(displayPath));
+    inkContext.restore();
+  } else {
+    drawStroke(points, color, width, dash);
+  }
   const marker = strokeDirectionMarker(points, 0.78);
   if (!marker) return;
 
@@ -502,7 +555,9 @@ function redrawInk() {
   if (referenceTemplate) {
     const visibleCount = stage === 1 ? template.length : Math.min(revealCount, template.length);
     for (let index = 0; index < visibleCount; index += 1) {
-      drawStrokeOrderGuide(referenceTemplate[index], index + 1);
+      drawStrokeOrderGuide(referenceTemplate[index], index + 1, {
+        displayPath: stage === 1 ? templateDisplay?.paths[index] : null,
+      });
     }
   }
 
@@ -622,6 +677,9 @@ async function recordCurrentAttempt(
   attemptRecordedReason = endedReason;
   const endedAt = new Date().toISOString();
   void saveCurrentAttemptLocally({ endedReason, endedAt, finalScore });
+  // Legacy server records have no variant field. Keep alternate-form attempts
+  // local with their explicit variant rather than labelling them as the base.
+  if (!allowsRemoteScoring(templateVariant)) return true;
   const payload = buildAttemptPayload({
     sessionId,
     attemptId,
@@ -693,7 +751,7 @@ function cacheTemplate(character, value) {
   }
 }
 
-async function loadTemplate({ forceNetwork = true } = {}) {
+async function loadTemplate({ forceNetwork = true, variantId, entryId } = {}) {
   const character = currentCharacter();
   if (!character) {
     setCoachMessage("연습할 한 글자만 선택하고 Enter를 눌러 주세요.", "retry", "!");
@@ -701,10 +759,20 @@ async function loadTemplate({ forceNetwork = true } = {}) {
   }
   elements.character.value = character;
   const characterChanged = character !== templateCharacter;
-  if (characterChanged) {
+  const nextVariant = variantId ?? (characterChanged ? "default" : templateVariant);
+  const nextEntry = entryId === undefined ? (characterChanged ? null : learningEntryId) : entryId;
+  const form = practiceForm(learningPack, character, nextVariant);
+  if (nextVariant !== "default" && !form) {
+    setCoachMessage("이 자형은 획순 연습용으로 검수되지 않았습니다.", "retry", "!");
+    return;
+  }
+  if (characterChanged || nextVariant !== templateVariant || nextEntry !== learningEntryId) {
     void recordCurrentAttempt("character_changed");
     templateCharacter = character;
-    template = getBuiltinTemplate(character) || cachedTemplate(character);
+    templateVariant = nextVariant;
+    learningEntryId = nextEntry;
+    templateDisplay = form?.display || null;
+    template = form?.strokes || getBuiltinTemplate(character) || cachedTemplate(character);
     setStage(1);
     resetVisibleAttempt(
       template
@@ -713,12 +781,19 @@ async function loadTemplate({ forceNetwork = true } = {}) {
     );
     coach.replaceTemplate(template);
   } else if (!template) {
-    template = getBuiltinTemplate(character) || cachedTemplate(character);
+    template = form?.strokes || getBuiltinTemplate(character) || cachedTemplate(character);
     coach.replaceTemplate(template);
     redrawInk();
   }
-
-  if (!forceNetwork) return;
+  if (form) templateDisplay = form.display;
+  learningPanel.setCharacter(character, templateVariant, templateDisplay, learningEntryId);
+  const remoteScoring = allowsRemoteScoring(templateVariant);
+  document.getElementById("go").disabled = !remoteScoring;
+  document.getElementById("scoring-scope").textContent = remoteScoring
+    ? "기본 획순 기준 · 손글씨 모양 선택은 채점 기준을 바꾸지 않습니다."
+    : "선택 자형의 로컬 획 교정만 사용합니다. AI 최종 채점·서버 보정·서버 기록은 지원 전입니다.";
+  redrawInk();
+  if (!forceNetwork || !remoteScoring || form) return;
   const token = coach.lifecycle.createRequest("template");
   try {
     const { status, body } = await api.request(
@@ -729,6 +804,8 @@ async function loadTemplate({ forceNetwork = true } = {}) {
     if (!coach.lifecycle.isCurrent(token)) return;
     if (status === 200 && isTemplate(body.strokes)) {
       template = body.strokes;
+      templateDisplay = body.display || null;
+      learningPanel.setCharacter(character, templateVariant, templateDisplay, learningEntryId);
       cacheTemplate(character, template);
       coach.replaceTemplate(template);
       redrawInk();
@@ -776,7 +853,7 @@ async function requestServerRefinement({
   historySequence,
 }) {
   const character = currentCharacter();
-  if (!character) return;
+  if (!character || !allowsRemoteScoring(templateVariant)) return;
   coach.lifecycle.abortKind("coach");
   const token = coach.lifecycle.createRequest("coach");
   const timeout = setTimeout(() => token.controller.abort(), 2500);
@@ -942,15 +1019,20 @@ for (const quick of document.getElementsByClassName("quick")) {
   quick.addEventListener("click", (event) => {
     elements.character.value = event.currentTarget.textContent;
     loadTemplate();
+    setStudySettingsOpen(false, { focusWriting: true });
   });
 }
 
-document.getElementById("load").addEventListener("click", () => loadTemplate());
+document.getElementById("load").addEventListener("click", () => {
+  void loadTemplate();
+  if (currentCharacter()) setStudySettingsOpen(false, { focusWriting: true });
+});
 elements.character.addEventListener("change", () => loadTemplate());
 elements.character.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.isComposing) {
     event.preventDefault();
     loadTemplate();
+    if (currentCharacter()) setStudySettingsOpen(false, { focusWriting: true });
   }
 });
 
@@ -1131,10 +1213,20 @@ function refreshPickerCategoryButtons() {
 function commitPickerCharacter(character) {
   if (!character) return;
   elements.character.value = character;
-  elements.picker.style.display = "none";
   elements.pickerSearch.value = "";
   pickerModel.setQuery("");
   void loadTemplate();
+  closeCharacterPicker({ focusWriting: true });
+}
+
+function closeCharacterPicker({ focusWriting = false } = {}) {
+  studySurface.inert = false;
+  (focusWriting ? elements.canvas : document.getElementById("pick")).focus({ preventScroll: true });
+  elements.picker.hidden = true;
+  elements.picker.inert = true;
+  elements.picker.setAttribute("aria-hidden", "true");
+  elements.picker.style.display = "none";
+  if (focusWriting) setStudySettingsOpen(false, { focusWriting: true });
 }
 
 async function loadCharacterCatalog() {
@@ -1168,6 +1260,7 @@ async function loadCharacterCatalog() {
       ...serverCharacters,
       ...indexedKanji,
       ...Object.keys(BUILTIN_TEMPLATES),
+      ...Object.keys(learningPack?.characters || {}),
     ], characterCatalogIndex);
     pickerModel.setCatalogIndex(characterCatalogIndex);
     pickerModel.setCharacters(allCharacters);
@@ -1178,18 +1271,43 @@ async function loadCharacterCatalog() {
 }
 
 document.getElementById("pick").addEventListener("click", async () => {
+  elements.picker.hidden = false;
+  elements.picker.inert = false;
+  elements.picker.setAttribute("aria-hidden", "false");
   elements.picker.style.display = "flex";
+  studySurface.inert = true;
   elements.pickerSearch.focus();
   resetCharacterGrid(pickerModel.setQuery(elements.pickerSearch.value));
   await loadCharacterCatalog();
 });
 
 document.getElementById("picker-close").addEventListener("click", () => {
-  elements.picker.style.display = "none";
+  closeCharacterPicker();
 });
 
 elements.picker.addEventListener("click", (event) => {
-  if (event.target === elements.picker) elements.picker.style.display = "none";
+  if (event.target === elements.picker) closeCharacterPicker();
+});
+
+elements.picker.addEventListener("keydown", (event) => {
+  if (event.isComposing || pickerComposing) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    closeCharacterPicker();
+  } else if (event.key === "Tab") {
+    const controls = Array.from(elements.picker.querySelectorAll("button:not([disabled]), input:not([disabled]), [tabindex='0']"))
+      .filter((control) => control.getClientRects().length > 0);
+    const first = controls[0];
+    const last = controls.at(-1);
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
 });
 
 elements.pickerGrid.addEventListener("click", (event) => {
@@ -1249,7 +1367,6 @@ elements.pickerSearch.addEventListener("keydown", (event) => {
     renderActivePickerResult({ scroll: true });
     return;
   }
-  if (event.key === "Escape") elements.picker.style.display = "none";
 });
 
 function correctionLabel(correction) {
@@ -1295,6 +1412,7 @@ function renderScoreReport(body) {
 }
 
 document.getElementById("go").addEventListener("click", async () => {
+  if (!allowsRemoteScoring(templateVariant)) return;
   const character = currentCharacter();
   if (!character) {
     setCoachMessage("연습할 문자를 먼저 입력하세요.", "retry", "!");
@@ -1357,6 +1475,25 @@ window.addEventListener("pagehide", () => {
   void recordCurrentAttempt("page_hidden", { keepalive: true });
 });
 
+const learningPanel = new LearningPanel({
+  onCharacter(character, entryId) {
+    elements.character.value = character;
+    void loadTemplate({ entryId });
+  },
+  onVariant(variantId) { void loadTemplate({ variantId }); },
+  onMode(nextStage) {
+    void recordCurrentAttempt("cleared");
+    setStage(nextStage);
+    resetVisibleAttempt(nextStage === 1 ? "선택한 획순 경로를 따라 써 보세요." : "모양을 기억해 써 보세요. 한 획 보기로 도움을 받을 수 있습니다.");
+  },
+});
+void learningPanel.load().then((pack) => {
+  learningPack = pack;
+  allCharacters = splitCharacters([...allCharacters, ...Object.keys(pack?.characters || {})]);
+  pickerModel.setCharacters(allCharacters);
+  void loadTemplate({ forceNetwork: false });
+});
+
 setStage(1);
 configureCanvases();
 void refreshLocalHistory();
@@ -1369,5 +1506,6 @@ globalThis.__LINGO_TUTOR__ = {
   get state() { return coach.machine.state; },
   get attemptRevision() { return coach.lifecycle.revision; },
   get expectedTemplateIndex() { return coach.expectedTemplateIndex; },
+  get templateVariant() { return templateVariant; },
   states: TUTOR_STATES,
 };

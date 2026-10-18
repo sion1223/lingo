@@ -28,7 +28,7 @@ from pydantic import BaseModel
 
 from scorer.chandra_scorer import analyze_chandra, load_chandra_scorer
 from scorer.hybrid import HybridScorer, load_stroke_scorer
-from scorer.kanjivg import char_to_file, load_char
+from scorer.kanjivg import char_to_file, load_char, load_display_paths
 from scorer.realtime import FastCoachEngine, InvalidStroke, TemplateUnavailable
 from scorer.schemas import (
     ApiErrorCode,
@@ -535,7 +535,10 @@ def template(char: str):
     if len(char) != 1 or not os.path.exists(char_to_file(KANJI_DIR, char)):
         raise HTTPException(404, f'문자 {char!r} 의 템플릿이 없습니다')
     strokes = load_char(KANJI_DIR, char)
-    return dict(char=char, strokes=[s.tolist() for s in strokes])
+    return dict(
+        char=char, strokes=[s.tolist() for s in strokes],
+        display=load_display_paths(char_to_file(KANJI_DIR, char)),
+    )
 
 
 @app.post('/coach/stroke', response_model=CoachStrokeResponse)

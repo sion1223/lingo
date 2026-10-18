@@ -9,39 +9,138 @@
   <meta name="lingo-api-base-url" content="">
   <meta name="lingo-edge-endpoint" content="">
   <meta name="lingo-api-key" content="">
-  <title>링고 — 한자 필기 채점</title>
+  <title>링고 — 일본어 학습과 필기</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/web/styles.css">
 </head>
 <body>
   <main>
-  <h1>링고 — 한자 필기 튜터</h1>
+  <div id="study-surface">
+  <h1 class="visually-hidden">링고 — 일본어 학습과 필기</h1>
+  <header class="study-header">
+    <button id="study-toggle" type="button" aria-expanded="false" aria-controls="study-settings">
+      <span class="current-practice"><span id="active-character" lang="ja">永</span><span id="active-mode">따라쓰기</span></span>
+      <span class="settings-label"><span id="study-toggle-label">학습·설정 열기</span><span class="settings-chevron" aria-hidden="true">⌄</span></span>
+    </button>
+  </header>
+  <section id="study-settings" hidden inert aria-hidden="true" aria-label="학습과 필기 설정">
+  <div class="study-layout">
+  <section id="learning-menu" class="study-card" aria-labelledby="learning-heading">
+    <h2 id="learning-heading">오늘 무엇을 배울까요?</h2>
+    <p class="muted">표현을 고르고, 한 글자씩 써 보세요.</p>
+    <label for="learning-track">학습 메뉴</label>
+    <select id="learning-track">
+      <option value="daily">일상회화 · 상황별</option>
+      <option value="jlpt">JLPT 대비 · 한자·어휘</option>
+      <option value="kana">기초 가나</option>
+    </select>
+    <label for="learning-group">학습 주제</label>
+    <select id="learning-group"></select>
+    <p id="jlpt-notice" class="study-notice" hidden></p>
+    <p id="learning-status" class="muted" role="status">학습 가이드 준비 중…</p>
+    <div id="learning-entries" aria-label="학습 예시"></div>
+    <section id="learning-detail" hidden aria-labelledby="entry-title">
+      <h3 id="entry-title" lang="ja"></h3>
+      <p id="entry-reading"></p>
+      <p id="entry-usage" class="muted"></p>
+      <p class="muted">연습할 구성 문자 선택</p>
+      <div id="entry-characters"></div>
+      <details>
+        <summary>이 예시의 분류 근거</summary>
+        <p id="entry-basis"></p>
+        <a id="entry-source" target="_blank" rel="noreferrer" hidden></a>
+      </details>
+    </section>
+    <p class="muted menu-footnote">읽기·뜻은 자체 작성한 작은 예시 모음입니다. 시험 전체 범위를 다루지 않습니다.</p>
+    <a href="https://www.jlpt.jp/faq/" target="_blank" rel="noreferrer">JLPT 공식 FAQ</a>
+  </section>
+
+  <div class="writing-settings">
+  <section class="study-card character-settings" aria-label="글자 선택">
+    <label for="chr">연습할 글자</label>
+    <div class="bar">
+      <input id="chr" value="永" maxlength="2" aria-label="연습할 문자">
+      <button id="pick" type="button">문자 선택</button>
+      <button id="load" type="button">선택한 글자 쓰기</button>
+    </div>
+    <div class="bar quick-choices" aria-label="빠른 문자 선택">
+      <button class="quick" type="button">永</button>
+      <button class="quick" type="button">水</button>
+      <button class="quick" type="button">木</button>
+      <button class="quick" type="button">日</button>
+      <button class="quick" type="button">語</button>
+      <button class="quick" type="button" title="자형 비교 예시">令</button>
+    </div>
+  </section>
+  <section id="example-panel" class="study-card" aria-label="손글씨 모양과 연습 경로">
+    <div class="example-settings">
+      <label for="example-font">손글씨 모양 예시</label>
+      <select id="example-font"><option value="system">기본 글꼴</option></select>
+    </div>
+    <div class="example-comparison">
+      <div><div id="handwriting-text" lang="ja">永</div><p id="font-status" class="muted" role="status">모양 참고용</p></div>
+      <div><div id="path-preview"></div><p id="path-preview-note" class="muted">현재 연습 경로</p></div>
+    </div>
+    <p class="muted">글꼴은 모양 참고용입니다. 아래 따라쓰기·교정은 선택한 획순 경로를 사용합니다.</p>
+    <a id="font-license" hidden target="_blank" rel="noreferrer"></a>
+    <details id="form-options">
+      <summary>연습 자형과 사용 범위</summary>
+      <label for="practice-variant">획순 연습 자형</label>
+      <select id="practice-variant"><option value="default">기본 획순</option></select>
+      <p id="variant-note" class="muted"></p>
+      <div id="variant-reference" hidden>
+        <div id="variant-reference-preview"></div>
+        <p id="variant-reference-note" class="muted"></p>
+      </div>
+      <p class="muted">정부 지정 서체가 아닙니다. 자형 예시는 유일한 정답 모양을 뜻하지 않습니다.</p>
+      <a href="https://www.bunka.go.jp/seisaku/kokugo_nihongo/kokugo_shisaku/joyokanjihyo_sakuin/index.html" target="_blank" rel="noreferrer">문화청 자형 지침</a>
+    </details>
+  </section>
+  <div class="practice-settings">
+    <label for="practice-mode">쓰기 단계</label>
+    <select id="practice-mode"><option value="1">1단계 · 따라쓰기</option><option value="2">2단계 · 암기쓰기</option></select>
+  </div>
+  <p id="scoring-scope" class="muted" role="status">기본 획순 기준으로 연습합니다.</p>
+
   <div id="status">
     <span class="dot" id="dot" aria-hidden="true"></span><span id="stxt">서버 확인 중…</span>
     <span id="stage-badge"></span>
   </div>
 
-  <div class="bar">
-    <input id="chr" value="永" maxlength="2" aria-label="연습할 문자">
-    <button id="pick" type="button">문자 선택</button>
-    <button id="load" type="button">가이드</button>
+  </div>
+  </div>
+  <div class="settings-notes">
+  <details id="data-note">
+    <summary>필기 기록 안내</summary>
+    쓰기를 마친 각 획은 순서·좌표·시간·필압·기울기 및 교정 결과와 함께 이 브라우저에
+    자동 저장됩니다. 연습이 끝나면 같은 필기 정보를 익명 세션 ID와 함께 서버에도
+    저장합니다. 개인 식별 정보는 수집하지 않으며, 현재 기록은 학습 동의가 없는 상태로
+    저장되어 별도 동의 전에는 모델 학습에 사용하지 않습니다.
+    대체 자형 연습 기록은 이 브라우저에만 저장됩니다.
+  </details>
+  <details id="local-history">
+    <summary>
+      이 기기에 저장된 글씨 시도 <span id="local-history-count">0</span>개
+    </summary>
+    <div id="local-history-status">로컬 필기 기록을 불러오는 중…</div>
+    <div id="local-history-list" aria-live="polite"></div>
+  </details>
+  <p class="asset-attribution">획순·곡선: <a href="https://kanjivg.tagaini.net/" target="_blank" rel="noreferrer">KanjiVG</a> · Ulrich Apel 및 기여자 · <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noreferrer">CC BY-SA 3.0</a></p>
+  </div>
+  <div class="settings-footer"><button id="study-done" type="button">선택 완료 · 쓰기</button></div>
+  </section>
+  <section id="practice-workspace" aria-label="글자 필기 연습">
+  <div id="wrap">
+    <canvas id="cv" tabindex="0" aria-label="획 번호와 방향 화살표가 포함된 일본어 필기 영역" aria-describedby="coach-text"></canvas>
+    <canvas id="coach-cv" aria-hidden="true"></canvas>
+    <div id="busy-overlay" aria-live="polite">채점 중…</div>
+  </div>
+
+  <div class="writing-actions" role="group" aria-label="필기 동작">
     <button id="hint" type="button" hidden>한 획 보기</button>
     <button id="undo" type="button">한 획 지우기</button>
     <button id="clear" type="button">전체 지우기</button>
-    <button id="go" type="button">채점하기</button>
-  </div>
-  <div class="bar" aria-label="빠른 문자 선택">
-    <button class="quick" type="button">永</button>
-    <button class="quick" type="button">水</button>
-    <button class="quick" type="button">木</button>
-    <button class="quick" type="button">日</button>
-    <button class="quick" type="button">語</button>
-  </div>
-
-  <div id="wrap">
-    <canvas id="cv" aria-label="획 번호와 방향 화살표가 포함된 한자 필기 영역"></canvas>
-    <canvas id="coach-cv" aria-hidden="true"></canvas>
-    <div id="busy-overlay" aria-live="polite">채점 중…</div>
+    <button id="go" type="button" aria-describedby="scoring-scope">채점하기</button>
   </div>
 
   <div id="coach-feedback" data-tone="success" role="status" aria-live="polite">
@@ -60,22 +159,9 @@
     <div id="teacher-secondary" hidden></div>
   </div>
   <div id="result"></div>
-  <details id="data-note">
-    <summary>필기 기록 안내</summary>
-    쓰기를 마친 각 획은 순서·좌표·시간·필압·기울기 및 교정 결과와 함께 이 브라우저에
-    자동 저장됩니다. 연습이 끝나면 같은 필기 정보를 익명 세션 ID와 함께 서버에도
-    저장합니다. 개인 식별 정보는 수집하지 않으며, 현재 기록은 학습 동의가 없는 상태로
-    저장되어 별도 동의 전에는 모델 학습에 사용하지 않습니다.
-  </details>
-  <details id="local-history">
-    <summary>
-      이 기기에 저장된 글씨 시도 <span id="local-history-count">0</span>개
-    </summary>
-    <div id="local-history-status">로컬 필기 기록을 불러오는 중…</div>
-    <div id="local-history-list" aria-live="polite"></div>
-  </details>
-
-  <div id="picker" role="dialog" aria-modal="true" aria-label="문자 선택">
+  </section>
+  </div>
+  <div id="picker" hidden inert aria-hidden="true" role="dialog" aria-modal="true" aria-label="문자 선택">
     <div id="picker-box">
       <div id="picker-top">
         <input
@@ -129,7 +215,9 @@
         "/web/coach/stroke-direction.js": "/web/coach/stroke-direction.js?v=__LINGO_WEB_ASSET_VERSION__",
         "/web/coach/teacher-feedback.js": "/web/coach/teacher-feedback.js?v=__LINGO_WEB_ASSET_VERSION__",
         "/web/coach/template-fit.js": "/web/coach/template-fit.js?v=__LINGO_WEB_ASSET_VERSION__",
-        "/web/local-attempt-store.js": "/web/local-attempt-store.js?v=__LINGO_WEB_ASSET_VERSION__"
+        "/web/local-attempt-store.js": "/web/local-attempt-store.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/learning.js": "/web/learning.js?v=__LINGO_WEB_ASSET_VERSION__",
+        "/web/learning-panel.js": "/web/learning-panel.js?v=__LINGO_WEB_ASSET_VERSION__"
       }
     }
   </script>

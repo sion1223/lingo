@@ -8,6 +8,7 @@
 - [docs/SERVE.md](docs/SERVE.md) — 서비스 켜기/끄기, 자동 기동 원리, 운영 가이드
 - [docs/RUNPOD.md](docs/RUNPOD.md) — RunPod에서 모델 학습 실행하기
 - [docs/TODO.md](docs/TODO.md) — 개선 계획
+- [docs/LEARNING_LIBRARY.md](docs/LEARNING_LIBRARY.md) — 상황별·JLPT 대비 학습 메뉴, 손글씨 예시, 검수 자형과 데이터 범위
 
 ## 폴더 구조
 

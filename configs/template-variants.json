@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "review_scope": "source-and-path-review; not handwriting-teacher certification or model calibration",
+  "characters": {
+    "木": {
+      "base_sha256": "098ea79de559f0fdd2485093063a5e570da89a0710a112ee0ee5c80ab1cccf1b",
+      "forms": [{
+        "id": "kaisho-hook", "file": "06728-Kaisho.svg", "label": "끝 올림이 있는 木",
+        "usage": "practice", "remote_scoring": false,
+        "source_sha256": "8c2ea016d302d68191b1c9b10d429d393d8f1f7e079ab93e57870b185b29baf0",
+        "stroke_count": 4, "stroke_types": ["㇐", "㇚", "㇒", "㇏"],
+        "note": "기본형과 같은 4획·같은 순서입니다. 2획 세로선 끝이 왼쪽 위로 올라갑니다. 선택한 경로로만 로컬 교정하며, 모든 자형을 자동 정답 처리하지 않습니다.",
+        "basis_url": "https://www.bunka.go.jp/seisaku/kokugo_nihongo/kokugo_shisaku/joyokanjihyo_sakuin/index.html"
+      }]
+    },
+    "令": {
+      "base_sha256": "f3868a9ff6a8a8f2395602d269b566a97788aee2cf9fddf3d2aaf8c6e7908593",
+      "forms": [{
+        "id": "print-reference", "file": "04ee4-Insatsu.svg", "label": "인쇄형에 가까운 令 · 참고만",
+        "usage": "reference", "remote_scoring": false,
+        "source_sha256": "ecb30a63f5b467b5079198cf83e84364c6c18b683f83a5eb19838863a680024d",
+        "stroke_count": 5, "stroke_types": ["㇒", "㇏", "㇐", "㇆", "㇑"],
+        "note": "두 예시는 모두 5획이지만 3획과 아래 4·5획 모양이 다릅니다. Insatsu 접미사는 인쇄형 자료이므로 이 예시를 손글씨 필순·채점 기준으로 자동 승인하지 않았습니다.",
+        "basis_url": "https://www.bunka.go.jp/seisaku/kokugo_nihongo/kokugo_shisaku/joyokanjihyo_sakuin/table_42_re.html"
+      }]
+    }
+  }
+}

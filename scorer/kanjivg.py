@@ -118,6 +118,28 @@ def char_to_file(kanji_dir, ch):
     return os.path.join(kanji_dir, f'{ord(ch):05x}.svg')
 
 
+def load_display_paths(path):
+    """Original curves in the exact coordinate frame of the legacy 12-point template.
+
+    Display only: do not replace the checkpoint's sampled representation with
+    these paths. Normalization deliberately uses the same sampled bounds.
+    """
+    with open(path, encoding='utf-8') as source:
+        matches = sorted(_PATH_RE.findall(source.read()), key=lambda item: int(item[0]))
+    raw = parse_svg(path, points_per_stroke=12)
+    if not raw or len(raw) != len(matches):
+        raise ValueError('incomplete display paths')
+    allp = np.concatenate(raw)
+    lo, hi = allp.min(0), allp.max(0)
+    scale = 0.9 / max((hi - lo).max(), 1e-6)
+    offset = 0.5 - (lo + hi) / 2 * scale
+    return {
+        'paths': [d for _, d in matches],
+        'scale': float(scale),
+        'offset': offset.tolist(),
+    }
+
+
 def load_char(kanji_dir, ch, points_per_stroke=12):
     strokes = parse_svg(char_to_file(kanji_dir, ch), points_per_stroke)
     if not strokes:

@@ -10,7 +10,8 @@ def test_root_uses_native_modules_without_embedded_deployment_credentials():
     response = client.get("/")
 
     assert response.status_code == 200
-    assert '<script type="module" src="/web/app.js"></script>' in response.text
+    assert '<script type="importmap">' in response.text
+    assert '<script type="module">import "/web/app.js";</script>' in response.text
     assert "supabase.co" not in response.text
     assert "eyJhbGci" not in response.text
 
@@ -26,4 +27,3 @@ def test_frontend_module_and_styles_are_served():
     assert "LocalCoachController" in app_response.text
     assert styles_response.status_code == 200
     assert styles_response.headers["content-type"].startswith("text/css")
-
