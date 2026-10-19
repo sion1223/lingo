@@ -7,8 +7,10 @@ and kanji have a KanjiVG template the app can teach.
 - daily: the learner describes a situation, Claude returns 1-2 short sentences.
 - jlpt:  Claude picks 2-3 kanji words for a level, avoiding recently shown ones.
 
-The key comes from ANTHROPIC_API_KEY, or from the git-ignored .env.local at the
-repository root (deployment environment values win).
+Credentials come from the environment or the git-ignored .env.local at the
+repository root (deployment environment values win): BAZE_API_KEY routes through
+the BAZE API Gateway, otherwise ANTHROPIC_API_KEY calls Anthropic directly.
+LINGO_CLAUDE_BASE_URL overrides the endpoint for either.
 """
 
 from __future__ import annotations
@@ -22,10 +24,14 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL = "claude-opus-5-5"
+DEFAULT_MODEL = "claude-haiku-5-5"
 DEFAULT_EFFORT = "low"
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
+BAZE_BASE_URL = "https://api.baze.co/v1/gateway/claude"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
+# Server-side refusal fallback exists on the Claude API for these families only
+# (not Haiku), and a gateway may not forward the beta parameter.
+SERVER_FALLBACK_MODEL_PREFIXES = ("claude-opus", "claude-fable", "claude-sonnet")
 JLPT_LEVELS = ("N5", "N4", "N3", "N2", "N1")
 DAILY_COUNT = 2
 JLPT_COUNT = 3
@@ -120,6 +126,12 @@ class DependencyUnavailableError(LearningAiError):
     message = "서버에 anthropic 패키지가 설치되지 않았어요."
 
 
+class ModelUnavailableError(LearningAiError):
+    status_code = 503
+    code = "AI_MODEL_UNAVAILABLE"
+    message = "설정된 Claude 모델을 쓸 수 없어요. 서버의 모델 이름을 확인해 주세요."
+
+
 class ProviderBusyError(LearningAiError):
     status_code = 429
     code = "AI_BUSY"
@@ -146,6 +158,19 @@ def load_local_environment() -> None:
     env_path = ROOT_DIR / ".env.local"
     if env_path.is_file():
         load_dotenv(dotenv_path=env_path, override=False)
+
+
+def provider_settings() -> dict | None:
+    """Anthropic client settings: a BAZE gateway key first, then a direct Anthropic key."""
+    load_local_environment()
+    base_url = os.environ.get("LINGO_CLAUDE_BASE_URL", "").strip()
+    baze_key = os.environ.get("BAZE_API_KEY", "").strip()
+    if baze_key:
+        return {"auth_token": baze_key, "base_url": base_url or BAZE_BASE_URL}
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if api_key:
+        return {"api_key": api_key, **({"base_url": base_url} if base_url else {})}
+    return None
 
 
 def is_practice_char(char: str) -> bool:
@@ -212,14 +237,15 @@ class LearningGenerator:
         self.timeout_seconds = timeout_seconds
         self._client_factory = client_factory
         self._client = None
+        self._via_gateway = False
         self._client_lock = threading.Lock()
         self._rng = rng or random.SystemRandom()
 
     def configured(self) -> bool:
-        if self._client_factory is not None:
-            return True
-        load_local_environment()
-        return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+        return self._client_factory is not None or provider_settings() is not None
+
+    def uses_server_fallback(self) -> bool:
+        return not self._via_gateway and self.model.startswith(SERVER_FALLBACK_MODEL_PREFIXES)
 
     def _get_client(self) -> Any:
         if self._client is not None:
@@ -230,16 +256,16 @@ class LearningGenerator:
             if self._client_factory is not None:
                 self._client = self._client_factory()
                 return self._client
-            load_local_environment()
-            api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-            if not api_key:
+            settings = provider_settings()
+            if settings is None:
                 raise MissingApiKeyError
             try:
                 import anthropic
             except ImportError as exc:
                 raise DependencyUnavailableError from exc
+            self._via_gateway = "base_url" in settings
             self._client = anthropic.Anthropic(
-                api_key=api_key,
+                **settings,
                 timeout=self.timeout_seconds,
                 max_retries=1,
             )
@@ -251,23 +277,31 @@ class LearningGenerator:
             import anthropic
         except ImportError:
             anthropic = None
+        request = {
+            "model": self.model,
+            "max_tokens": 16000,
+            "output_config": {
+                "effort": self.effort,
+                "format": {"type": "json_schema", "schema": schema},
+            },
+            "system": SYSTEM_PROMPT,
+            "messages": [{"role": "user", "content": prompt}],
+        }
         try:
-            response = client.beta.messages.create(
-                model=self.model,
-                max_tokens=16000,
-                betas=[FALLBACK_BETA],
-                fallbacks="default",
-                output_config={
-                    "effort": self.effort,
-                    "format": {"type": "json_schema", "schema": schema},
-                },
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            if self.uses_server_fallback():
+                response = client.beta.messages.create(
+                    **request,
+                    betas=[FALLBACK_BETA],
+                    fallbacks="default",
+                )
+            else:
+                response = client.messages.create(**request)
         except Exception as exc:
             if anthropic is not None:
                 if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError)):
                     raise InvalidApiKeyError from exc
+                if isinstance(exc, anthropic.NotFoundError):
+                    raise ModelUnavailableError from exc
                 if isinstance(exc, anthropic.RateLimitError):
                     raise ProviderBusyError from exc
                 if isinstance(exc, (anthropic.APIStatusError, anthropic.APIConnectionError)):

@@ -27,7 +27,12 @@ class FakeMessages:
 
 class FakeClient:
     def __init__(self, response):
+        self.messages = FakeMessages(response)
         self.beta = SimpleNamespace(messages=FakeMessages(response))
+
+    @property
+    def calls(self):
+        return self.messages.calls + self.beta.messages.calls
 
 
 def reply(payload, *, stop_reason="end_turn", prefix=()):
@@ -41,9 +46,9 @@ def reply(payload, *, stop_reason="end_turn", prefix=()):
     )
 
 
-def generator_for(response):
+def generator_for(response, **options):
     client = FakeClient(response)
-    return LearningGenerator(client_factory=lambda: client), client
+    return LearningGenerator(client_factory=lambda: client, **options), client
 
 
 def test_daily_keeps_only_sentences_the_app_can_teach():
@@ -58,13 +63,39 @@ def test_daily_keeps_only_sentences_the_app_can_teach():
 
     assert [entry["text"] for entry in entries] == ["水をください"]
     assert entries[0]["source"] == "claude" and entries[0]["kind"] == "daily"
-    call = client.beta.messages.calls[0]
-    assert call["model"] == "claude-opus-5-5"
-    assert call["betas"] == [FALLBACK_BETA]
-    assert call["fallbacks"] == "default"
+    assert client.beta.messages.calls == []
+    call = client.messages.calls[0]
+    assert call["model"] == "claude-haiku-5-5"
+    assert "fallbacks" not in call and "betas" not in call
     assert call["output_config"]["effort"] == "low"
     assert call["output_config"]["format"]["type"] == "json_schema"
     assert "<situation>카페에서 주문하기</situation>" in call["messages"][0]["content"]
+
+
+def test_server_fallback_only_for_models_that_support_it():
+    payload = {"sentences": [{"japanese": "水", "reading": "みず", "korean": "물", "usage": ""}]}
+    generator, client = generator_for(reply(payload), model="claude-opus-5-5")
+    generator.generate_daily("식당", AVAILABLE)
+    call = client.beta.messages.calls[0]
+    assert call["betas"] == [FALLBACK_BETA] and call["fallbacks"] == "default"
+
+
+def test_baze_key_routes_through_the_gateway_with_bearer_auth(monkeypatch):
+    monkeypatch.setattr(learning_ai, "load_local_environment", lambda: None)
+    monkeypatch.delenv("LINGO_CLAUDE_BASE_URL", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "direct-placeholder")
+    monkeypatch.setenv("BAZE_API_KEY", "gateway-placeholder")
+
+    assert learning_ai.provider_settings() == {
+        "auth_token": "gateway-placeholder",
+        "base_url": learning_ai.BAZE_BASE_URL,
+    }
+    generator = LearningGenerator(model="claude-opus-5-5")
+    generator._get_client()
+    assert generator.uses_server_fallback() is False
+
+    monkeypatch.delenv("BAZE_API_KEY")
+    assert learning_ai.provider_settings() == {"api_key": "direct-placeholder"}
 
 
 def test_jlpt_needs_kanji_and_skips_words_already_shown():
@@ -79,7 +110,7 @@ def test_jlpt_needs_kanji_and_skips_words_already_shown():
     assert [entry["text"] for entry in entries] == ["準備"]
     assert entries[0]["group"] == "N3" and entries[0]["estimated"] is True
     assert entries[0]["usage"] == "예문: 準備する — 준비하다"
-    prompt = client.beta.messages.calls[0]["messages"][0]["content"]
+    prompt = client.calls[0]["messages"][0]["content"]
     assert "JLPT N3" in prompt and "確認" in prompt
 
 
@@ -98,6 +129,7 @@ def test_refusal_and_fallback_switch_are_handled():
 
 def test_missing_key_is_reported_without_calling_claude(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("BAZE_API_KEY", raising=False)
     monkeypatch.setattr(learning_ai, "load_local_environment", lambda: None)
     generator = LearningGenerator()
 
@@ -129,6 +161,7 @@ def test_generate_route_returns_entries_and_enforces_limits(monkeypatch):
 
 def test_generate_route_explains_missing_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("BAZE_API_KEY", raising=False)
     monkeypatch.setattr(learning_ai, "load_local_environment", lambda: None)
     monkeypatch.setattr(server, "_learning_generator", LearningGenerator())
     client = TestClient(server.app)
