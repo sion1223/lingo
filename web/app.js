@@ -1,6 +1,7 @@
 import { ApiClient } from "./api.js";
 import { allowsRemoteScoring, practiceForm } from "./learning.js";
 import { LearningPanel } from "./learning-panel.js";
+import { advanceHint, hintedStrokeIndexes, NO_HINT } from "./hint-reveal.js";
 import {
   applyServerStrokeResult,
   buildAttemptPayload,
@@ -104,7 +105,7 @@ let learningEntryId = null;
 let lastReport = null;
 let penSeen = false;
 let stage = 1;
-let revealCount = 0;
+let hintReveal = NO_HINT;
 let framePending = false;
 let lastPartialAnalysisAt = Number.NEGATIVE_INFINITY;
 let allCharacters = splitCharacters(Object.keys(BUILTIN_TEMPLATES));
@@ -473,7 +474,7 @@ function prepareTeacherExplanation(diagnosis, { countAttempt = true } = {}) {
 function setStage(nextStage) {
   stage = nextStage;
   document.getElementById("practice-mode").value = String(stage);
-  revealCount = 0;
+  hintReveal = NO_HINT;
   const mode = stage === 1 ? "trace" : "recall";
   coach.setMode(mode);
   document.body.dataset.practiceMode = mode;
@@ -629,8 +630,10 @@ function redrawInk() {
     ? fitTemplateToWriting(template, strokes)
     : template;
   if (referenceTemplate) {
-    const visibleCount = stage === 1 ? template.length : Math.min(revealCount, template.length);
-    for (let index = 0; index < visibleCount; index += 1) {
+    const visibleIndexes = stage === 1
+      ? template.map((_stroke, index) => index)
+      : hintedStrokeIndexes(hintReveal, template.length);
+    for (const index of visibleIndexes) {
       drawStrokeOrderGuide(referenceTemplate[index], index + 1, {
         displayPath: stage === 1 ? templateDisplay?.paths[index] : null,
       });
@@ -798,6 +801,7 @@ function resetVisibleAttempt(message = "첫 획부터 천천히 써 보세요.")
   currentStroke = null;
   currentPointerId = null;
   lastReport = null;
+  hintReveal = NO_HINT;
   elements.result.replaceChildren();
   elements.nextStage.hidden = true;
   elements.busyOverlay.style.display = "none";
@@ -1117,7 +1121,7 @@ elements.nextStage.addEventListener("click", () => {
 
 elements.hint.addEventListener("click", () => {
   if (stage !== 2 || !template) return;
-  if (revealCount < template.length) revealCount += 1;
+  hintReveal = advanceHint(hintReveal, coach.expectedTemplateIndex, template.length);
   lastReport = null;
   elements.result.replaceChildren();
   redrawInk();
