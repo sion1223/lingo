@@ -34,9 +34,23 @@
       <option value="jlpt">JLPT 대비 · 한자·어휘</option>
       <option value="kana">기초 가나</option>
     </select>
-    <label for="learning-group">학습 주제</label>
-    <select id="learning-group"></select>
+    <div id="learning-group-field">
+      <label for="learning-group">학습 주제</label>
+      <select id="learning-group"></select>
+    </div>
+    <div id="daily-ai" hidden>
+      <label for="daily-situation">어떤 상황을 연습하고 싶나요?</label>
+      <div class="ai-input-row">
+        <input id="daily-situation" maxlength="80" autocomplete="off" placeholder="예: 카페에서 아이스 라떼 주문하기">
+        <button id="daily-generate" type="button">문장 만들기</button>
+      </div>
+      <div id="daily-suggestions" class="ai-suggestions" aria-label="상황 예시"></div>
+    </div>
+    <div id="jlpt-ai" hidden>
+      <button id="jlpt-generate" type="button">다른 단어 받기</button>
+    </div>
     <p id="jlpt-notice" class="study-notice" hidden></p>
+    <p id="ai-status" class="muted" role="status" aria-live="polite"></p>
     <p id="learning-status" class="muted" role="status">학습 가이드 준비 중…</p>
     <div id="learning-entries" aria-label="학습 예시"></div>
     <section id="learning-detail" hidden aria-labelledby="entry-title">
@@ -51,7 +65,7 @@
         <a id="entry-source" target="_blank" rel="noreferrer" hidden></a>
       </details>
     </section>
-    <p class="muted menu-footnote">읽기·뜻은 자체 작성한 작은 예시 모음입니다. 시험 전체 범위를 다루지 않습니다.</p>
+    <p class="muted menu-footnote">일상회화·JLPT 예시는 Claude가 만들어 틀릴 수 있어요. 시험 전체 범위를 다루지 않습니다.</p>
     <a href="https://www.jlpt.jp/faq/" target="_blank" rel="noreferrer">JLPT 공식 FAQ</a>
   </section>
 
@@ -63,14 +77,8 @@
       <button id="pick" type="button">문자 선택</button>
       <button id="load" type="button">선택한 글자 쓰기</button>
     </div>
-    <div class="bar quick-choices" aria-label="빠른 문자 선택">
-      <button class="quick" type="button">永</button>
-      <button class="quick" type="button">水</button>
-      <button class="quick" type="button">木</button>
-      <button class="quick" type="button">日</button>
-      <button class="quick" type="button">語</button>
-      <button class="quick" type="button" title="자형 비교 예시">令</button>
-    </div>
+    <p id="recommend-label" class="muted recommend-label">비슷한 수준의 다른 글자</p>
+    <div id="recommendations" class="bar quick-choices" aria-labelledby="recommend-label"></div>
   </section>
   <section id="example-panel" class="study-card" aria-label="손글씨 모양과 연습 경로">
     <div class="example-settings">

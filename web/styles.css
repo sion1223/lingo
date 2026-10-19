@@ -485,6 +485,21 @@ summary { cursor: pointer; }
 #learning-entries small { display: block; color: #625c52; font-size: 12px; line-height: 1.5; }
 #learning-entries.kana-entries { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 #learning-entries.kana-entries button { text-align: center; padding: 4px; }
+#learning-entries.kana-entries { gap: 6px; }
+#learning-entries .kana-head { color: #625c52; font-size: 12px; font-weight: 700; text-align: center; }
+#learning-entries .kana-gap { min-height: 1px; }
+#learning-entries[aria-busy="true"] { opacity: 0.6; }
+.ai-input-row { display: flex; gap: 6px; }
+.ai-input-row input { flex: 1; min-width: 0; min-height: 44px; padding: 0 12px; border: 1px solid #b8b3a8; border-radius: 9px; background: #fff; font: inherit; font-size: 14px; }
+.ai-input-row input:focus-visible { outline: 3px solid #84adff; outline-offset: 2px; }
+#daily-generate, #jlpt-generate { background: #175cd3; color: #fff; font-weight: 600; }
+#daily-generate:disabled, #jlpt-generate:disabled { opacity: 0.6; cursor: progress; }
+.ai-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+.ai-suggestions button { min-height: 32px; padding: 0 10px; border: 1px solid #d6d0c5; border-radius: 999px; background: #fff; font-size: 13px; }
+#jlpt-ai { margin-top: 10px; }
+#ai-status:empty { display: none; }
+#ai-status[data-tone="error"] { color: #b42318; }
+#ai-status[data-tone="loading"]::before { content: "⏳ "; }
 #learning-entries button[aria-pressed="true"], #entry-characters button[aria-pressed="true"] { background: #e7f0ff; border-color: #175cd3; color: #174b9b; }
 button:disabled, select:disabled { opacity: 0.65; cursor: default; }
 #learning-detail { margin-top: 18px; border-top: 1px solid #d6d0c5; padding-top: 14px; }
@@ -524,6 +539,10 @@ button:disabled, select:disabled { opacity: 0.65; cursor: default; }
 .character-settings .bar { justify-content: flex-start; margin-top: 8px; margin-bottom: 0; }
 .quick-choices { gap: 6px; }
 .quick-choices .quick { flex: 1; padding: 0 8px; }
+.recommend-label { margin: 10px 0 4px; }
+.quick-choices .rec-char { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; min-width: 0; min-height: 52px; padding: 4px; }
+.rec-glyph { font-size: 20px; line-height: 1.1; }
+.rec-hun { max-width: 100%; overflow: hidden; color: #625c52; font-size: 10px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 #study-settings #status { margin-top: 12px; line-height: 1.6; }
 .settings-notes { border-top: 1px solid #ded9cf; margin-top: 14px; padding-top: 2px; }
 .settings-notes #data-note, .settings-notes #local-history { max-width: none; margin: 12px 0; }

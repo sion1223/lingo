@@ -34,6 +34,16 @@
 | FastAPI 서버 | `TEACHER_RATE_LIMIT_PER_MINUTE` | 공개 교사 API의 익명 클라이언트별 분당 요청 상한, 기본 60(1~600) |
 | FastAPI 서버 | `TEACHER_DAILY_REQUEST_LIMIT` | 프로세스 전체 UTC 일일 요청 상한, 기본 1,000(1~100,000) |
 | 별도 teacher FastAPI | `LINGO_SERVICE_MODE=teacher-only` | coach/deep scorer preload를 건너뛰고 `/health`를 teacher 기준으로 응답 |
+| FastAPI 서버 | `ANTHROPIC_API_KEY` | 학습 메뉴의 Claude 문장·JLPT 어휘 생성(`POST /learn/generate`) 서버 전용 비밀키; 브라우저에 노출 금지. 환경변수 대신 git 제외 파일 `/workspace/lingo/.env.local`에 `ANTHROPIC_API_KEY=...` 한 줄로 넣어도 된다 |
+| FastAPI 서버 | `LINGO_CLAUDE_MODEL` | 생성 모델, 기본 `claude-opus-5-5` |
+| FastAPI 서버 | `LINGO_CLAUDE_EFFORT` | 생성 effort, 기본 `low`(짧은 JSON 생성이라 지연 우선) |
+| FastAPI 서버 | `LEARNING_AI_RATE_LIMIT_PER_MINUTE` | 익명 클라이언트별 분당 생성 요청 상한, 기본 10(1~120) |
+| FastAPI 서버 | `LEARNING_AI_DAILY_REQUEST_LIMIT` | 프로세스 전체 UTC 일일 생성 요청 상한, 기본 300(1~20,000) |
+
+`anthropic` 패키지는 위 학습 메뉴 생성에만 쓴다. 키가 없거나 호출이 실패하면 `/learn/generate`가
+`AI_NOT_CONFIGURED` 등 오류 코드를 돌려주고, 화면은 기존 편집자 예시로 대신 보여 준다.
+`/health.learning_ai_ready`로 키 설정 여부를 확인할 수 있다. 요청에는 server-side fallback
+(`fallbacks: "default"`)을 켜 두어 Claude가 거절하면 Anthropic 권장 모델로 한 번 더 시도한다.
 
 정적 HTML에는 배포 과정에서 `window.LINGO_CONFIG = { edgeEndpoint, apiKey }` 또는 동등한
 meta 설정을 주입한다. service role key는 브라우저에 넣지 않는다.

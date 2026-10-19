@@ -16,6 +16,7 @@ import {
   meaningRecord,
   primaryHun,
   primaryRomaji,
+  recommendSimilarCharacters,
   sortCharactersByCatalog,
   splitCharacters,
 } from "./character-picker.js";
@@ -69,6 +70,8 @@ const elements = {
   stageBadge: document.getElementById("stage-badge"),
   hint: document.getElementById("hint"),
   nextStage: document.getElementById("next-stage"),
+  recommendations: document.getElementById("recommendations"),
+  recommendLabel: document.getElementById("recommend-label"),
   picker: document.getElementById("picker"),
   pickerGrid: document.getElementById("picker-grid"),
   pickerInfo: document.getElementById("picker-info"),
@@ -109,6 +112,8 @@ let visibleCharacters = [...allCharacters];
 let shownCharacters = 0;
 let characterCatalogPromise = null;
 let characterCatalogIndex = Object.create(null);
+let characterCatalogEntries = [];
+let kanjiCatalogPromise = null;
 let characterReadingIndex = Object.create(null);
 let characterMeaningIndex = Object.create(null);
 let pickerComposing = false;
@@ -139,8 +144,60 @@ function updatePracticeSummary() {
   const meaning = document.getElementById("active-meaning");
   meaning.textContent = summary;
   meaning.title = summary;
+  renderRecommendations();
   document.getElementById("active-mode").textContent = (stage === 1 ? "따라쓰기" : "암기쓰기")
     + (templateVariant === "default" ? "" : " · 대체 자형");
+}
+
+function renderRecommendations() {
+  const character = templateCharacter || currentCharacter() || "";
+  const picks = recommendSimilarCharacters(character, {
+    catalogEntries: characterCatalogEntries,
+    catalogIndex: characterCatalogIndex,
+    strokes: Array.isArray(template) ? template.length : null,
+  });
+  elements.recommendLabel.textContent = picks.length
+    ? `비슷한 수준의 다른 글자 · ${character} 기준`
+    : "비슷한 수준의 다른 글자 · 추천을 준비하고 있어요";
+  elements.recommendations.replaceChildren(...picks.map((pick) => {
+    const hint = primaryHun(pick, characterMeaningIndex) || primaryRomaji(pick, characterReadingIndex);
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "quick rec-char";
+    item.dataset.character = pick;
+    item.setAttribute("aria-label", [pick, hint, "연습"].filter(Boolean).join(" "));
+    const glyph = document.createElement("span");
+    glyph.className = "rec-glyph";
+    glyph.lang = "ja";
+    glyph.textContent = pick;
+    const label = document.createElement("span");
+    label.className = "rec-hun";
+    label.textContent = hint;
+    item.append(glyph, label);
+    item.addEventListener("click", () => {
+      elements.character.value = pick;
+      void loadTemplate();
+      setStudySettingsOpen(false, { focusWriting: true });
+    });
+    return item;
+  }));
+}
+
+function loadKanjiCatalog() {
+  kanjiCatalogPromise ??= fetch(characterCatalogUrl)
+    .then(async (response) => {
+      if (!response.ok) throw new Error("character catalog unavailable");
+      const catalog = await response.json();
+      characterCatalogEntries = Array.isArray(catalog.entries) ? catalog.entries : [];
+      characterCatalogIndex = createCatalogIndex(characterCatalogEntries);
+      renderRecommendations();
+      return catalog;
+    })
+    .catch((error) => {
+      console.warn("kanji catalog unavailable", error);
+      return null;
+    });
+  return kanjiCatalogPromise;
 }
 
 function setStudySettingsOpen(open, { focusWriting = false } = {}) {
@@ -829,6 +886,7 @@ async function loadTemplate({ forceNetwork = true, variantId, entryId } = {}) {
       learningPanel.setCharacter(character, templateVariant, templateDisplay, learningEntryId);
       cacheTemplate(character, template);
       coach.replaceTemplate(template);
+      renderRecommendations();
       redrawInk();
       if (strokes.length === 0) {
         setCoachMessage("가이드가 준비됐어요. 첫 획부터 써 보세요.", "success", "○");
@@ -1037,14 +1095,6 @@ document.getElementById("clear").addEventListener("click", () => {
   resetVisibleAttempt();
 });
 
-for (const quick of document.getElementsByClassName("quick")) {
-  quick.addEventListener("click", (event) => {
-    elements.character.value = event.currentTarget.textContent;
-    loadTemplate();
-    setStudySettingsOpen(false, { focusWriting: true });
-  });
-}
-
 document.getElementById("load").addEventListener("click", () => {
   void loadTemplate();
   if (currentCharacter()) setStudySettingsOpen(false, { focusWriting: true });
@@ -1212,7 +1262,7 @@ function resetCharacterGrid(characters = pickerModel.matches) {
   renderCharacterChunk();
 }
 
-function renderActivePickerResult({ scroll = false } = {}) {
+function renderActivePickerResult({ scroll = false, block = "nearest" } = {}) {
   while (
     pickerModel.activeIndex >= shownCharacters
     && shownCharacters < visibleCharacters.length
@@ -1231,7 +1281,16 @@ function renderActivePickerResult({ scroll = false } = {}) {
   active.classList.add("active");
   active.setAttribute("aria-selected", "true");
   elements.pickerSearch.setAttribute("aria-activedescendant", active.id);
-  if (scroll) active.scrollIntoView({ block: "nearest" });
+  if (scroll) active.scrollIntoView({ block });
+}
+
+// Open the picker where the character being practiced sits.
+function focusPickerOnCurrentCharacter() {
+  elements.pickerSearch.value = "";
+  pickerModel.focusCharacter(templateCharacter || currentCharacter());
+  refreshPickerCategoryButtons();
+  resetCharacterGrid(pickerModel.matches);
+  renderActivePickerResult({ scroll: true, block: "center" });
 }
 
 function refreshPickerSearch() {
@@ -1288,12 +1347,9 @@ async function loadCharacterCatalog() {
       if (!response.ok) throw new Error("reading index unavailable");
       return response.json();
     }),
-    fetch(characterCatalogUrl).then(async (response) => {
-      if (!response.ok) throw new Error("character catalog unavailable");
-      return response.json();
-    }),
+    loadKanjiCatalog(),
     loadMeaningIndex(),
-  ]).then(([serverCatalog, readings, kanjiCatalog]) => {
+  ]).then(([serverCatalog, readings]) => {
     const serverCharacters = serverCatalog.status === "fulfilled"
       && serverCatalog.value.status === 200
       && typeof serverCatalog.value.body.chars === "string"
@@ -1302,9 +1358,6 @@ async function loadCharacterCatalog() {
     const indexedKanji = readings.status === "fulfilled"
       ? Object.keys(readings.value.readings ?? {})
       : [];
-    characterCatalogIndex = kanjiCatalog.status === "fulfilled"
-      ? createCatalogIndex(kanjiCatalog.value.entries ?? [])
-      : Object.create(null);
     characterReadingIndex = readings.status === "fulfilled"
       ? readings.value.readings ?? {}
       : Object.create(null);
@@ -1330,8 +1383,11 @@ document.getElementById("pick").addEventListener("click", async () => {
   elements.picker.style.display = "flex";
   studySurface.inert = true;
   elements.pickerSearch.focus();
-  resetCharacterGrid(pickerModel.setQuery(elements.pickerSearch.value));
+  focusPickerOnCurrentCharacter();
   await loadCharacterCatalog();
+  if (!elements.picker.hidden && !elements.pickerSearch.value.trim()) {
+    focusPickerOnCurrentCharacter();
+  }
 });
 
 document.getElementById("picker-close").addEventListener("click", () => {
@@ -1529,6 +1585,7 @@ window.addEventListener("pagehide", () => {
 });
 
 const learningPanel = new LearningPanel({
+  requestGeneration: (payload, options) => api.request("learn", payload, options),
   onCharacter(character, entryId) {
     elements.character.value = character;
     void loadTemplate({ entryId });
@@ -1549,6 +1606,7 @@ void learningPanel.load().then((pack) => {
 
 setStage(1);
 void loadMeaningIndex();
+void loadKanjiCatalog();
 configureCanvases();
 void refreshLocalHistory();
 loadTemplate();

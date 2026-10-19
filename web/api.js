@@ -103,6 +103,14 @@ export class ApiClient {
         body: JSON.stringify(payload),
         keepalive,
       };
+    } else if (action === "learn") {
+      url = joinUrl(base, "/learn/generate");
+      init = {
+        ...init,
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      };
     } else if (action === "verbalize" || action === "summary") {
       url = joinUrl(base, action === "summary" ? "/coach/summary" : "/coach/verbalize");
       init = {

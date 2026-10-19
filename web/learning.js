@@ -1,5 +1,7 @@
 // Learning-menu metadata only. These levels never become recognition labels.
-export const JLPT_NOTICE = "N5~N1 대비는 편집자가 추정한 소규모 학습 예시입니다. JLPT는 공식 급수별 어휘·한자 전체 목록을 공개하지 않습니다. 구성 한자의 개별 급수를 뜻하지 않습니다.";
+export const JLPT_NOTICE = "N5~N1 어휘는 Claude가 급수를 추정해 매번 새로 고릅니다. JLPT는 공식 급수별 어휘·한자 전체 목록을 공개하지 않으므로 참고용으로 보세요. 구성 한자의 개별 급수를 뜻하지 않습니다.";
+export const DAILY_SUGGESTIONS = Object.freeze(["카페에서 주문하기", "길 묻기", "호텔 체크인", "처음 만난 사람에게 자기소개", "편의점에서 계산하기"]);
+export const KANA_VOWELS = Object.freeze(["a", "i", "u", "e", "o"]);
 export const LEARNING_SOURCES = Object.freeze({
   jlpt: { label: "JLPT 공식 급수 설명", url: "https://www.jlpt.jp/e/about/levelsummary.html" },
   faq: { label: "JLPT 공식 FAQ", url: "https://www.jlpt.jp/faq/" },
@@ -68,6 +70,28 @@ export const LEARNING_ENTRIES = Object.freeze([
 
 export function entriesForGroup(group) {
   return LEARNING_ENTRIES.filter((entry) => entry.group === group);
+}
+
+// Gojūon chart rows (a, ka, … wa, n) with null where the table has no kana.
+export function kanaTable(group) {
+  const script = group === "katakana" ? 1 : 0;
+  const entries = new Map(entriesForGroup(group).map((entry) => [entry.text, entry]));
+  const rows = [];
+  for (const row of kanaRows) {
+    const readings = row[2].split(" ");
+    let cells = Array(KANA_VOWELS.length).fill(null);
+    Array.from(row[script]).forEach((text, index) => {
+      if (readings[index] === "n") {
+        rows.push(cells);
+        cells = Array(KANA_VOWELS.length).fill(null);
+        cells[0] = entries.get(text) ?? null;
+        return;
+      }
+      cells[KANA_VOWELS.indexOf(readings[index].at(-1))] = entries.get(text) ?? null;
+    });
+    rows.push(cells);
+  }
+  return rows;
 }
 
 export function practiceCharacters(entry) {

@@ -149,6 +149,67 @@ export function isKana(value) {
   );
 }
 
+const KANA_ORDERS = Object.freeze([
+  "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん",
+  "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン",
+].map((order) => Array.from(order)));
+const SMALL_KANA = "ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮ";
+const FULL_KANA = "あいうえおつやゆよわアイウエオツヤユヨワ";
+const OTHER_JOYO_GRADE = 8;
+export const RECOMMENDATION_COUNT = 6;
+
+function baseKana(character) {
+  const plain = character.normalize("NFD").replace(/[゙゚]/gu, "");
+  const small = SMALL_KANA.indexOf(plain);
+  return small >= 0 ? FULL_KANA[small] : plain;
+}
+
+// Characters at a similar level: the next kana in gojūon order, the nearest
+// kanji of the same school grade in catalog order, or, for kanji outside the
+// jōyō catalog, other jōyō kanji with a similar stroke count.
+export function recommendSimilarCharacters(
+  value,
+  { catalogEntries = [], catalogIndex = {}, strokes = null, count = RECOMMENDATION_COUNT } = {},
+) {
+  const character = splitCharacters(value)[0];
+  if (!character) return [];
+  if (isKana(character)) {
+    const base = baseKana(character);
+    const order = KANA_ORDERS.find((letters) => letters.includes(base));
+    if (!order) return [];
+    const index = order.indexOf(base);
+    const picks = [];
+    for (let step = 1; picks.length < count && step < order.length; step += 1) {
+      const candidate = order[(index + step) % order.length];
+      if (candidate !== character) picks.push(candidate);
+    }
+    return picks;
+  }
+  const info = catalogIndex?.[character];
+  if (info) {
+    const sameGrade = catalogEntries
+      .filter((entry) => Number(entry.grade) === info.grade)
+      .map((entry) => entry.character);
+    const position = sameGrade.indexOf(character);
+    const picks = [];
+    for (let distance = 1; picks.length < count && distance < sameGrade.length; distance += 1) {
+      for (const candidate of [sameGrade[position + distance], sameGrade[position - distance]]) {
+        if (candidate && picks.length < count) picks.push(candidate);
+      }
+    }
+    return picks;
+  }
+  if (Number.isFinite(strokes) && strokes > 0) {
+    return catalogEntries
+      .filter((entry) => Number(entry.grade) === OTHER_JOYO_GRADE)
+      .map((entry, order) => ({ character: entry.character, gap: Math.abs(Number(entry.strokes) - strokes), order }))
+      .sort((left, right) => left.gap - right.gap || left.order - right.order)
+      .slice(0, count)
+      .map((entry) => entry.character);
+  }
+  return [];
+}
+
 export function createCatalogIndex(entries = []) {
   const index = Object.create(null);
   for (const [order, entry] of entries.entries()) {
@@ -333,6 +394,21 @@ export class CharacterPickerModel {
   setQuery(query) {
     this.query = String(query ?? "");
     return this.refresh();
+  }
+
+  // Clear the search and make `character` the active result, switching to its
+  // category when the current filter hides it.
+  focusCharacter(character) {
+    const target = splitCharacters(character)[0];
+    this.query = "";
+    this.refresh();
+    if (!target || !this.characters.includes(target)) return false;
+    if (!this.matches.includes(target)) {
+      this.category = categoryForCharacter(target, this.catalogIndex);
+      this.refresh();
+    }
+    this.activeIndex = Math.max(0, this.matches.indexOf(target));
+    return this.matches[this.activeIndex] === target;
   }
 
   refresh() {

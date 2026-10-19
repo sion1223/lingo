@@ -79,3 +79,26 @@ test("official font files and OFL notices match audit hashes and cover the menu"
     assert.equal(fontSupports(font, "🦄"), false);
   }
 });
+
+test("kana menus are laid out as the gojūon chart with gaps", async () => {
+  const { kanaTable, KANA_VOWELS } = await import("../learning.js");
+  const hiragana = kanaTable("hiragana").map((row) => row.map((entry) => entry?.text ?? "·").join(""));
+  assert.equal(KANA_VOWELS.join(""), "aiueo");
+  assert.deepEqual(hiragana, [
+    "あいうえお", "かきくけこ", "さしすせそ", "たちつてと", "なにぬねの",
+    "はひふへほ", "まみむめも", "や·ゆ·よ", "らりるれろ", "わ···を", "ん····",
+  ]);
+  const katakana = kanaTable("katakana").flat().filter(Boolean);
+  assert.equal(katakana.length, 46);
+  assert.equal(kanaTable("katakana")[9][4].text, "ヲ");
+});
+
+test("generated entries keep a fixed shape and stay practicable", async () => {
+  const { normalizeGeneratedEntry } = await import("../learning-panel.js");
+  const entry = normalizeGeneratedEntry({ id: "ai-daily-1", kind: "daily", text: "水をください", reading: "みずをください", meaning: "물을 주세요", extra: "<b>x</b>" });
+  assert.equal(entry.source, "claude");
+  assert.equal(entry.kind, "daily");
+  assert.equal("extra" in entry, false);
+  assert.deepEqual(practiceCharacters(entry), ["水", "を", "く", "だ", "さ", "い"]);
+  assert.equal(normalizeGeneratedEntry({ kind: "jlpt", text: "準備" }).estimated, true);
+});

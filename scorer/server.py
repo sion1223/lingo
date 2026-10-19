@@ -16,7 +16,7 @@ from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import numpy as np
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -24,11 +24,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, StringConstraints
 
 from scorer.chandra_scorer import analyze_chandra, load_chandra_scorer
 from scorer.hybrid import HybridScorer, load_stroke_scorer
 from scorer.kanjivg import char_to_file, load_char, load_display_paths
+from scorer.learning_ai import LearningAiError, LearningGenerator
 from scorer.realtime import FastCoachEngine, InvalidStroke, TemplateUnavailable
 from scorer.schemas import (
     ApiErrorCode,
@@ -62,6 +63,11 @@ MAX_TEACHER_RATE_LIMIT_PER_MINUTE = 600
 DEFAULT_TEACHER_DAILY_REQUEST_LIMIT = 1000
 MAX_TEACHER_DAILY_REQUEST_LIMIT = 100000
 MAX_TEACHER_CLIENT_BUCKETS = 4096
+DEFAULT_LEARNING_MAX_CONCURRENCY = 4
+DEFAULT_LEARNING_RATE_LIMIT_PER_MINUTE = 10
+MAX_LEARNING_RATE_LIMIT_PER_MINUTE = 120
+DEFAULT_LEARNING_DAILY_REQUEST_LIMIT = 300
+MAX_LEARNING_DAILY_REQUEST_LIMIT = 20000
 
 
 def _configured_service_mode():
@@ -185,6 +191,21 @@ _teacher_request_budget = TeacherRequestBudget(
     _configured_teacher_daily_limit(),
 )
 _teacher_client_salt = os.urandom(16)
+_learning_generator = None
+_learning_lock = threading.Lock()
+_learning_slots = threading.BoundedSemaphore(DEFAULT_LEARNING_MAX_CONCURRENCY)
+_learning_request_budget = TeacherRequestBudget(
+    _configured_positive_int(
+        'LEARNING_AI_RATE_LIMIT_PER_MINUTE',
+        DEFAULT_LEARNING_RATE_LIMIT_PER_MINUTE,
+        MAX_LEARNING_RATE_LIMIT_PER_MINUTE,
+    ),
+    _configured_positive_int(
+        'LEARNING_AI_DAILY_REQUEST_LIMIT',
+        DEFAULT_LEARNING_DAILY_REQUEST_LIMIT,
+        MAX_LEARNING_DAILY_REQUEST_LIMIT,
+    ),
+)
 _attempt_log_lock = threading.Lock()
 
 
@@ -253,6 +274,14 @@ def get_teacher_renderer():
         if _teacher_renderer is None:
             _teacher_renderer = TeacherRenderer()
     return _teacher_renderer
+
+
+def get_learning_generator():
+    global _learning_generator
+    with _learning_lock:
+        if _learning_generator is None:
+            _learning_generator = LearningGenerator()
+    return _learning_generator
 
 
 def require_teacher_api_token(
@@ -453,6 +482,16 @@ class ScoreRequest(BaseModel):
     mode: Literal['trace', 'recall'] = 'trace'
 
 
+class LearnGenerateRequest(BaseModel):
+    kind: Literal['daily', 'jlpt']
+    situation: Annotated[str, StringConstraints(strip_whitespace=True, max_length=80)] = ''
+    level: Literal['N5', 'N4', 'N3', 'N2', 'N1'] | None = None
+    exclude: list[Annotated[str, StringConstraints(max_length=12)]] = Field(
+        default_factory=list,
+        max_length=40,
+    )
+
+
 def _sanitize(report):
     """analyze_chandra 리포트에서 JSON 직렬화 불가 항목 정리."""
     out = dict(report)
@@ -510,6 +549,7 @@ def health():
         teacher_ready=teacher_ready,
         teacher_rate_limit_per_minute=_teacher_request_budget.per_minute,
         teacher_daily_request_limit=_teacher_request_budget.daily_limit,
+        learning_ai_ready=get_learning_generator().configured(),
         coach_ready=coach_ready,
         coach_engine=_coach_engine.mode if coach_ready else None,
         coach_load_error=_coach_load_error,
@@ -599,6 +639,41 @@ def coach_summary(
 ):
     """Render a completion summary without entering either scoring hot path."""
     return _render_teacher(req, purpose='summary', request=request)
+
+
+def _learning_error(status_code, code, message):
+    return HTTPException(status_code=status_code, detail={'code': code, 'message': message})
+
+
+@app.post('/learn/generate')
+def learn_generate(req: LearnGenerateRequest, request: Request):
+    """Claude가 만든 일상회화 문장(1~2개) 또는 JLPT 어휘(2~3개)."""
+    if req.kind == 'daily' and not req.situation:
+        raise _learning_error(422, 'SITUATION_REQUIRED', '연습하고 싶은 상황을 입력해 주세요.')
+    if req.kind == 'jlpt' and req.level is None:
+        raise _learning_error(422, 'LEVEL_REQUIRED', 'JLPT 급수를 골라 주세요.')
+    generator = get_learning_generator()
+    if not generator.configured():
+        raise _learning_error(503, 'AI_NOT_CONFIGURED', '서버에 Claude API 키가 아직 설정되지 않았어요.')
+    limit_reason = _learning_request_budget.consume(_teacher_client_key(request))
+    if limit_reason == 'daily_budget_exceeded':
+        raise _learning_error(429, 'AI_DAILY_LIMIT', '오늘 AI 생성 횟수를 모두 썼어요. 내일 다시 시도해 주세요.')
+    if limit_reason:
+        raise _learning_error(429, 'AI_RATE_LIMITED', '요청이 너무 잦아요. 1분 뒤에 다시 시도해 주세요.')
+    if not _learning_slots.acquire(blocking=False):
+        raise _learning_error(429, 'AI_BUSY', '다른 요청을 처리하고 있어요. 잠시 후 다시 시도해 주세요.')
+    try:
+        available = frozenset(chars()['chars'])
+        if req.kind == 'daily':
+            entries = generator.generate_daily(req.situation, available)
+        else:
+            entries = generator.generate_jlpt(req.level, req.exclude, available)
+    except LearningAiError as exc:
+        LOGGER.warning('learning generation failed: %s', exc.code, exc_info=exc.__cause__ is not None)
+        raise _learning_error(exc.status_code, exc.code, exc.message) from exc
+    finally:
+        _learning_slots.release()
+    return {'entries': entries, 'model': generator.model}
 
 
 @app.post('/score')

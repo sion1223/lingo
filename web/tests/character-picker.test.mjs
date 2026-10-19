@@ -141,3 +141,39 @@ test("Korean 훈음 index labels kanji and makes them searchable by meaning or s
   assert.deepEqual(searchCharacters("나라 국", "学国水", {}, meaningIndex), ["国"]);
   assert.deepEqual(searchCharacters("수", "学国水", {}, meaningIndex), ["水"]);
 });
+
+test("recommendations stay at a similar level", async () => {
+  const { recommendSimilarCharacters } = await import("../character-picker.js");
+  const catalog = JSON.parse(readFileSync(new URL("../data/kanji-catalog.json", import.meta.url), "utf8")).entries;
+  const catalogIndex = createCatalogIndex(catalog);
+
+  assert.deepEqual(recommendSimilarCharacters("か"), ["き", "く", "け", "こ", "さ", "し"]);
+  assert.deepEqual(recommendSimilarCharacters("ン").slice(0, 2), ["ア", "イ"]);
+  assert.equal(recommendSimilarCharacters("が")[0], "き");
+
+  const picks = recommendSimilarCharacters("水", { catalogEntries: catalog, catalogIndex });
+  assert.equal(picks.length, 6);
+  assert.ok(!picks.includes("水"));
+  for (const pick of picks) assert.equal(catalogIndex[pick].grade, catalogIndex["水"].grade);
+
+  const rare = recommendSimilarCharacters("鬱", { catalogEntries: catalog, catalogIndex: {}, strokes: 29 });
+  assert.equal(rare.length, 6);
+  for (const pick of rare) assert.equal(catalogIndex[pick].grade, 8);
+  assert.deepEqual(recommendSimilarCharacters("A", { catalogEntries: catalog, catalogIndex }), []);
+});
+
+test("picker focus jumps to the practiced character and its category", () => {
+  const catalog = JSON.parse(readFileSync(new URL("../data/kanji-catalog.json", import.meta.url), "utf8")).entries;
+  const catalogIndex = createCatalogIndex(catalog);
+  const characters = sortCharactersByCatalog(catalog.map((entry) => entry.character), catalogIndex);
+  const picker = new CharacterPickerModel(characters, {}, catalogIndex);
+  picker.setQuery("mizu");
+  picker.setCategory("G1");
+
+  assert.equal(picker.focusCharacter("語"), true);
+  assert.equal(picker.query, "");
+  assert.equal(picker.category, "G2");
+  assert.equal(picker.matches[picker.activeIndex], "語");
+  assert.ok(picker.activeIndex > 0);
+  assert.equal(picker.focusCharacter("Ω"), false);
+});
