@@ -36,13 +36,14 @@
 | 별도 teacher FastAPI | `LINGO_SERVICE_MODE=teacher-only` | coach/deep scorer preload를 건너뛰고 `/health`를 teacher 기준으로 응답 |
 | FastAPI 서버 | `BAZE_API_KEY` | 학습 메뉴의 Claude 문장·JLPT 어휘 생성(`POST /learn/generate`)을 BAZE API Gateway(`https://api.baze.co/v1/gateway/claude`, Bearer 인증)로 보낸다. 서버 전용 비밀키; 브라우저에 노출 금지. 환경변수 대신 git 제외 파일 `/workspace/lingo/.env.local`에 `BAZE_API_KEY=...` 한 줄로 넣어도 된다. 있으면 `ANTHROPIC_API_KEY`보다 우선 |
 | FastAPI 서버 | `ANTHROPIC_API_KEY` | BAZE 키가 없을 때 Anthropic API를 직접 호출하는 키(같은 `.env.local` 방식 가능) |
-| FastAPI 서버 | `LINGO_CLAUDE_BASE_URL` | 선택 사항. 생성 API 주소를 바꿀 때만 |
-| FastAPI 서버 | `LINGO_CLAUDE_MODEL` | 생성 모델, 기본 `claude-haiku-5-5`. 게이트웨이가 다른 ID를 쓰면 `/models/` 목록의 ID로 지정 |
-| FastAPI 서버 | `LINGO_CLAUDE_EFFORT` | 생성 effort, 기본 `low`(짧은 JSON 생성이라 지연 우선) |
+| FastAPI 서버 | `LINGO_AI_MODEL` | 생성 모델, 기본 `gemini-3.5-flash-lite`(BAZE `/models/` 목록의 ID). `claude-*`는 Anthropic SDK로 BAZE `/claude` 주소(또는 `ANTHROPIC_API_KEY`로 Anthropic 직접)를, 그 밖의 모델은 OpenAI 호환 Chat Completions로 BAZE `https://api.baze.co/v1/gateway`를 호출한다. 예전 이름 `LINGO_CLAUDE_MODEL`도 읽는다 |
+| FastAPI 서버 | `LINGO_CLAUDE_BASE_URL` / `LINGO_OPENAI_BASE_URL` | 선택 사항. 각 경로의 API 주소를 바꿀 때만 |
+| FastAPI 서버 | `LINGO_CLAUDE_EFFORT` | Claude 모델일 때만 쓰는 생성 effort, 기본 `low`(짧은 JSON 생성이라 지연 우선) |
 | FastAPI 서버 | `LEARNING_AI_RATE_LIMIT_PER_MINUTE` | 익명 클라이언트별 분당 생성 요청 상한, 기본 10(1~120) |
 | FastAPI 서버 | `LEARNING_AI_DAILY_REQUEST_LIMIT` | 프로세스 전체 UTC 일일 생성 요청 상한, 기본 300(1~20,000) |
 
-`anthropic` 패키지는 위 학습 메뉴 생성에만 쓴다. 키가 없거나 호출이 실패하면 `/learn/generate`가
+`anthropic` 패키지는 학습 메뉴 생성의 Claude 경로에만 쓰고, Gemini 등 다른 모델은 이미 있는 `openai`
+패키지로 BAZE를 호출한다(JSON Schema `response_format`, strict). 키가 없거나 호출이 실패하면 `/learn/generate`가
 `AI_NOT_CONFIGURED` 등 오류 코드를 돌려주고, 화면은 기존 편집자 예시로 대신 보여 준다.
 `/health.learning_ai_ready`로 키 설정 여부를 확인할 수 있다. Anthropic API를 직접 호출하면서
 Opus·Sonnet·Fable 모델을 쓸 때만 server-side fallback(`fallbacks: "default"`)을 켠다. Haiku에는

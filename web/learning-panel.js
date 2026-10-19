@@ -128,7 +128,7 @@ export class LearningPanel {
     ]);
     if (results[0].status === "fulfilled" && results[0].value.schema_version === 1) {
       this.pack = results[0].value;
-      $("learning-status").textContent = `기초 가나 92자 · 일상회화와 JLPT 예시는 Claude가 새로 만들어요 · ${Object.keys(this.pack.characters).length}자 로컬 가이드`;
+      $("learning-status").textContent = `기초 가나 92자 · 일상회화와 JLPT 예시는 AI가 새로 만들어요 · ${Object.keys(this.pack.characters).length}자 로컬 가이드`;
     } else {
       $("learning-status").textContent = "학습 가이드를 불러오지 못했습니다. 페이지를 새로고침해 주세요. 기존 문자 검색은 사용할 수 있습니다.";
     }
@@ -154,7 +154,7 @@ export class LearningPanel {
     this.cancelGeneration();
     this.clearEntry();
     this.setAiStatus(track === "daily" && !this.shown[DAILY_AI_GROUP]?.length
-      ? "상황을 입력하면 Claude가 연습 문장 1~2개를 만들어 줘요."
+      ? "상황을 입력하면 AI가 연습 문장 1~2개를 만들어 줘요."
       : "");
     if (track === "jlpt") void this.generateJlpt();
     this.renderEntries();
@@ -274,7 +274,7 @@ export class LearningPanel {
       $("daily-situation").focus();
       return;
     }
-    const result = await this.runGeneration({ kind: "daily", situation }, "Claude가 문장을 만드는 중이에요…");
+    const result = await this.runGeneration({ kind: "daily", situation }, "AI가 문장을 만드는 중이에요…");
     if (!result) return;
     this.clearEntry();
     if (result.entries) {
@@ -292,7 +292,7 @@ export class LearningPanel {
     const recent = this.recentWords[level] || [];
     const result = await this.runGeneration(
       { kind: "jlpt", level, exclude: recent.slice(-MAX_RECENT_WORDS) },
-      `Claude가 ${level} 단어를 고르는 중이에요…`,
+      `AI가 ${level} 단어를 고르는 중이에요…`,
     );
     if (!result) return;
     this.clearEntry();

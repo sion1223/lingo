@@ -29,10 +29,11 @@ class FakeClient:
     def __init__(self, response):
         self.messages = FakeMessages(response)
         self.beta = SimpleNamespace(messages=FakeMessages(response))
+        self.chat = SimpleNamespace(completions=FakeMessages(response))
 
     @property
     def calls(self):
-        return self.messages.calls + self.beta.messages.calls
+        return self.messages.calls + self.beta.messages.calls + self.chat.completions.calls
 
 
 def reply(payload, *, stop_reason="end_turn", prefix=()):
@@ -46,6 +47,12 @@ def reply(payload, *, stop_reason="end_turn", prefix=()):
     )
 
 
+def chat_reply(payload, *, finish_reason="stop", refusal=None):
+    content = json.dumps(payload, ensure_ascii=False)
+    message = SimpleNamespace(content=content, refusal=refusal)
+    return SimpleNamespace(choices=[SimpleNamespace(finish_reason=finish_reason, message=message)])
+
+
 def generator_for(response, **options):
     client = FakeClient(response)
     return LearningGenerator(client_factory=lambda: client, **options), client
@@ -57,7 +64,7 @@ def test_daily_keeps_only_sentences_the_app_can_teach():
         {"japanese": "OKです", "reading": "おーけーです", "korean": "좋아요", "usage": "대답"},
         {"japanese": "珈琲をください", "reading": "こーひーをください", "korean": "커피 주세요", "usage": "카페"},
         {"japanese": "お願いします", "reading": "おねがいします", "korean": "부탁합니다", "usage": "부탁"},
-    ]}))
+    ]}), model="claude-haiku-5-5")
 
     entries = generator.generate_daily("카페에서 주문하기", AVAILABLE)
 
@@ -94,8 +101,39 @@ def test_baze_key_routes_through_the_gateway_with_bearer_auth(monkeypatch):
     generator._get_client()
     assert generator.uses_server_fallback() is False
 
+    monkeypatch.delenv("LINGO_OPENAI_BASE_URL", raising=False)
+    assert learning_ai.openai_settings() == {
+        "api_key": "gateway-placeholder",
+        "base_url": learning_ai.BAZE_OPENAI_BASE_URL,
+    }
+
     monkeypatch.delenv("BAZE_API_KEY")
     assert learning_ai.provider_settings() == {"api_key": "direct-placeholder"}
+    assert learning_ai.openai_settings() is None
+
+
+def test_default_gemini_model_uses_gateway_chat_completions(monkeypatch):
+    monkeypatch.delenv("LINGO_AI_MODEL", raising=False)
+    monkeypatch.delenv("LINGO_CLAUDE_MODEL", raising=False)
+    generator, client = generator_for(chat_reply({"sentences": [
+        {"japanese": "水をください", "reading": "みずをください", "korean": "물을 주세요", "usage": "식당에서"},
+    ]}))
+
+    entries = generator.generate_daily("식당", AVAILABLE)
+
+    assert generator.model == "gemini-3.5-flash-lite" and generator.is_claude is False
+    assert [entry["text"] for entry in entries] == ["水をください"]
+    assert client.messages.calls == [] and client.beta.messages.calls == []
+    call = client.chat.completions.calls[0]
+    assert call["model"] == "gemini-3.5-flash-lite"
+    assert call["messages"][0]["role"] == "system"
+    assert call["response_format"]["type"] == "json_schema"
+    assert call["response_format"]["json_schema"]["strict"] is True
+    assert call["response_format"]["json_schema"]["name"] == "daily_sentences"
+
+    blocked, _ = generator_for(chat_reply({"sentences": []}, finish_reason="content_filter"))
+    with pytest.raises(RefusedError):
+        blocked.generate_daily("식당", AVAILABLE)
 
 
 def test_jlpt_needs_kanji_and_skips_words_already_shown():
@@ -103,7 +141,7 @@ def test_jlpt_needs_kanji_and_skips_words_already_shown():
         {"word": "準備", "reading": "じゅんび", "korean": "준비", "example_japanese": "準備する", "example_korean": "준비하다"},
         {"word": "すし", "reading": "すし", "korean": "초밥", "example_japanese": "", "example_korean": ""},
         {"word": "確認", "reading": "かくにん", "korean": "확인", "example_japanese": "", "example_korean": ""},
-    ]}))
+    ]}), model="claude-haiku-5-5")
 
     entries = generator.generate_jlpt("N3", ["確認"], AVAILABLE)
 
@@ -115,7 +153,7 @@ def test_jlpt_needs_kanji_and_skips_words_already_shown():
 
 
 def test_refusal_and_fallback_switch_are_handled():
-    generator, _ = generator_for(reply({"sentences": []}, stop_reason="refusal"))
+    generator, _ = generator_for(reply({"sentences": []}, stop_reason="refusal"), model="claude-haiku-5-5")
     with pytest.raises(RefusedError):
         generator.generate_daily("상황", AVAILABLE)
 
@@ -123,7 +161,7 @@ def test_refusal_and_fallback_switch_are_handled():
         {"sentences": [{"japanese": "水", "reading": "みず", "korean": "물", "usage": ""}]},
         prefix=(SimpleNamespace(type="text", text="{partial"), SimpleNamespace(type="fallback")),
     )
-    generator, _ = generator_for(switched)
+    generator, _ = generator_for(switched, model="claude-haiku-5-5")
     assert generator.generate_daily("상황", AVAILABLE)[0]["text"] == "水"
 
 
@@ -141,7 +179,7 @@ def test_missing_key_is_reported_without_calling_claude(monkeypatch):
 def test_generate_route_returns_entries_and_enforces_limits(monkeypatch):
     generator, _ = generator_for(reply({"sentences": [
         {"japanese": "水をください", "reading": "みずをください", "korean": "물을 주세요", "usage": "식당에서"},
-    ]}))
+    ]}), model="claude-haiku-5-5")
     monkeypatch.setattr(server, "_learning_generator", generator)
     monkeypatch.setattr(server, "_learning_request_budget", server.TeacherRequestBudget(1, 10))
     client = TestClient(server.app)

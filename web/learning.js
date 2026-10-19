@@ -1,5 +1,5 @@
 // Learning-menu metadata only. These levels never become recognition labels.
-export const JLPT_NOTICE = "N5~N1 어휘는 Claude가 급수를 추정해 매번 새로 고릅니다. JLPT는 공식 급수별 어휘·한자 전체 목록을 공개하지 않으므로 참고용으로 보세요. 구성 한자의 개별 급수를 뜻하지 않습니다.";
+export const JLPT_NOTICE = "N5~N1 어휘는 AI가 급수를 추정해 매번 새로 고릅니다. JLPT는 공식 급수별 어휘·한자 전체 목록을 공개하지 않으므로 참고용으로 보세요. 구성 한자의 개별 급수를 뜻하지 않습니다.";
 export const DAILY_SUGGESTIONS = Object.freeze(["카페에서 주문하기", "길 묻기", "호텔 체크인", "처음 만난 사람에게 자기소개", "편의점에서 계산하기"]);
 export const KANA_VOWELS = Object.freeze(["a", "i", "u", "e", "o"]);
 export const LEARNING_SOURCES = Object.freeze({

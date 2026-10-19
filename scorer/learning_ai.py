@@ -1,16 +1,19 @@
-"""Claude-generated practice material for the learning menu.
+"""AI-generated practice material for the learning menu.
 
 The browser never sees the API key: it calls POST /learn/generate on this
-server, which asks Claude for structured JSON and keeps only items whose kana
-and kanji have a KanjiVG template the app can teach.
+server, which asks the model for structured JSON and keeps only items whose
+kana and kanji have a KanjiVG template the app can teach.
 
-- daily: the learner describes a situation, Claude returns 1-2 short sentences.
-- jlpt:  Claude picks 2-3 kanji words for a level, avoiding recently shown ones.
+- daily: the learner describes a situation, the model returns 1-2 short sentences.
+- jlpt:  the model picks 2-3 kanji words for a level, avoiding recently shown ones.
 
-Credentials come from the environment or the git-ignored .env.local at the
-repository root (deployment environment values win): BAZE_API_KEY routes through
-the BAZE API Gateway, otherwise ANTHROPIC_API_KEY calls Anthropic directly.
-LINGO_CLAUDE_BASE_URL overrides the endpoint for either.
+The model comes from LINGO_AI_MODEL (default gemini-3.5-flash-lite). Claude
+models (claude-*) use the Anthropic SDK; other models use the OpenAI-compatible
+Chat Completions API of the BAZE API Gateway. Credentials come from the
+environment or the git-ignored .env.local at the repository root (deployment
+environment values win): BAZE_API_KEY for the gateway, or ANTHROPIC_API_KEY to
+call Anthropic directly. LINGO_CLAUDE_BASE_URL / LINGO_OPENAI_BASE_URL override
+the endpoints.
 """
 
 from __future__ import annotations
@@ -24,10 +27,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL = "claude-haiku-5-5"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_EFFORT = "low"
 EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max")
 BAZE_BASE_URL = "https://api.baze.co/v1/gateway/claude"
+BAZE_OPENAI_BASE_URL = "https://api.baze.co/v1/gateway"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Server-side refusal fallback exists on the Claude API for these families only
 # (not Haiku), and a gateway may not forward the beta parameter.
@@ -111,31 +115,31 @@ class LearningAiError(Exception):
 class MissingApiKeyError(LearningAiError):
     status_code = 503
     code = "AI_NOT_CONFIGURED"
-    message = "서버에 Claude API 키가 아직 설정되지 않았어요."
+    message = "서버에 AI API 키가 아직 설정되지 않았어요."
 
 
 class InvalidApiKeyError(LearningAiError):
     status_code = 503
     code = "AI_NOT_CONFIGURED"
-    message = "서버의 Claude API 키가 올바르지 않아요. 키를 다시 확인해 주세요."
+    message = "서버의 AI API 키가 올바르지 않아요. 키를 다시 확인해 주세요."
 
 
 class DependencyUnavailableError(LearningAiError):
     status_code = 503
     code = "AI_NOT_CONFIGURED"
-    message = "서버에 anthropic 패키지가 설치되지 않았어요."
+    message = "서버에 AI 호출용 패키지가 설치되지 않았어요."
 
 
 class ModelUnavailableError(LearningAiError):
     status_code = 503
     code = "AI_MODEL_UNAVAILABLE"
-    message = "설정된 Claude 모델을 쓸 수 없어요. 서버의 모델 이름을 확인해 주세요."
+    message = "설정된 AI 모델을 쓸 수 없어요. 서버의 모델 이름을 확인해 주세요."
 
 
 class ProviderBusyError(LearningAiError):
     status_code = 429
     code = "AI_BUSY"
-    message = "Claude 사용량이 많아요. 잠시 후 다시 시도해 주세요."
+    message = "AI 사용량이 많아요. 잠시 후 다시 시도해 주세요."
 
 
 class RefusedError(LearningAiError):
@@ -171,6 +175,16 @@ def provider_settings() -> dict | None:
     if api_key:
         return {"api_key": api_key, **({"base_url": base_url} if base_url else {})}
     return None
+
+
+def openai_settings() -> dict | None:
+    """OpenAI-compatible client settings for non-Claude models on the BAZE gateway."""
+    load_local_environment()
+    baze_key = os.environ.get("BAZE_API_KEY", "").strip()
+    if not baze_key:
+        return None
+    base_url = os.environ.get("LINGO_OPENAI_BASE_URL", "").strip()
+    return {"api_key": baze_key, "base_url": base_url or BAZE_OPENAI_BASE_URL}
 
 
 def is_practice_char(char: str) -> bool:
@@ -231,7 +245,13 @@ class LearningGenerator:
         timeout_seconds: float = 45.0,
         rng: random.Random | None = None,
     ) -> None:
-        self.model = (model or os.environ.get("LINGO_CLAUDE_MODEL") or DEFAULT_MODEL).strip()
+        self.model = (
+            model
+            or os.environ.get("LINGO_AI_MODEL")
+            or os.environ.get("LINGO_CLAUDE_MODEL")
+            or DEFAULT_MODEL
+        ).strip()
+        self.is_claude = self.model.startswith("claude")
         configured_effort = (effort or os.environ.get("LINGO_CLAUDE_EFFORT") or DEFAULT_EFFORT).strip()
         self.effort = configured_effort if configured_effort in EFFORT_LEVELS else DEFAULT_EFFORT
         self.timeout_seconds = timeout_seconds
@@ -241,11 +261,18 @@ class LearningGenerator:
         self._client_lock = threading.Lock()
         self._rng = rng or random.SystemRandom()
 
+    def _settings(self) -> dict | None:
+        return provider_settings() if self.is_claude else openai_settings()
+
     def configured(self) -> bool:
-        return self._client_factory is not None or provider_settings() is not None
+        return self._client_factory is not None or self._settings() is not None
 
     def uses_server_fallback(self) -> bool:
-        return not self._via_gateway and self.model.startswith(SERVER_FALLBACK_MODEL_PREFIXES)
+        return (
+            self.is_claude
+            and not self._via_gateway
+            and self.model.startswith(SERVER_FALLBACK_MODEL_PREFIXES)
+        )
 
     def _get_client(self) -> Any:
         if self._client is not None:
@@ -256,23 +283,63 @@ class LearningGenerator:
             if self._client_factory is not None:
                 self._client = self._client_factory()
                 return self._client
-            settings = provider_settings()
+            settings = self._settings()
             if settings is None:
                 raise MissingApiKeyError
             try:
-                import anthropic
+                if self.is_claude:
+                    from anthropic import Anthropic as client_class
+                else:
+                    from openai import OpenAI as client_class
             except ImportError as exc:
                 raise DependencyUnavailableError from exc
             self._via_gateway = "base_url" in settings
-            self._client = anthropic.Anthropic(
+            self._client = client_class(
                 **settings,
                 timeout=self.timeout_seconds,
                 max_retries=1,
             )
             return self._client
 
-    def _request(self, prompt: str, schema: dict) -> dict:
+    def _request(self, prompt: str, schema: dict, name: str) -> dict:
         client = self._get_client()
+        text = self._claude_text(client, prompt, schema) if self.is_claude else self._chat_text(client, prompt, schema, name)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise InvalidOutputError from exc
+
+    def _chat_text(self, client: Any, prompt: str, schema: dict, name: str) -> str:
+        try:
+            import openai
+        except ImportError:
+            openai = None
+        try:
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {"name": name, "schema": schema, "strict": True},
+                },
+            )
+        except Exception as exc:
+            if openai is not None:
+                if isinstance(exc, (openai.AuthenticationError, openai.PermissionDeniedError)):
+                    raise InvalidApiKeyError from exc
+                if isinstance(exc, openai.NotFoundError):
+                    raise ModelUnavailableError from exc
+                if isinstance(exc, openai.RateLimitError):
+                    raise ProviderBusyError from exc
+                if isinstance(exc, (openai.APIStatusError, openai.APIConnectionError)):
+                    raise LearningAiError from exc
+            raise
+        return chat_response_text(response)
+
+    def _claude_text(self, client: Any, prompt: str, schema: dict) -> str:
         try:
             import anthropic
         except ImportError:
@@ -307,10 +374,7 @@ class LearningGenerator:
                 if isinstance(exc, (anthropic.APIStatusError, anthropic.APIConnectionError)):
                     raise LearningAiError from exc
             raise
-        try:
-            return json.loads(response_text(response))
-        except json.JSONDecodeError as exc:
-            raise InvalidOutputError from exc
+        return response_text(response)
 
     def generate_daily(self, situation: str, available: frozenset[str]) -> list[dict]:
         situation = _clean(situation, 80)
@@ -322,7 +386,7 @@ class LearningGenerator:
             "For each: japanese (the sentence), reading (its full reading in hiragana), korean "
             "(a natural Korean translation), usage (one short Korean sentence on when to use it)."
         )
-        data = self._request(prompt, DAILY_SCHEMA)
+        data = self._request(prompt, DAILY_SCHEMA, "daily_sentences")
         entries = []
         for item in data.get("sentences", []):
             text = _clean(item.get("japanese"), 40)
@@ -342,7 +406,7 @@ class LearningGenerator:
                 "usage": usage,
                 "kind": "daily",
                 "source": "claude",
-                "basis": "Claude가 입력한 상황에 맞춰 만든 예문입니다. 표현이 자연스러운지 한 번 더 확인해 주세요.",
+                "basis": "AI가 입력한 상황에 맞춰 만든 예문입니다. 표현이 자연스러운지 한 번 더 확인해 주세요.",
             })
         if not entries:
             raise InvalidOutputError
@@ -365,7 +429,7 @@ class LearningGenerator:
             "(hiragana), korean (its Korean meaning), example_japanese (a short natural example "
             "sentence using the word, at most 20 characters), example_korean (its Korean translation)."
         )
-        data = self._request(prompt, JLPT_SCHEMA)
+        data = self._request(prompt, JLPT_SCHEMA, "jlpt_words")
         entries = []
         for item in data.get("words", []):
             word = _clean(item.get("word"), 12)
@@ -395,7 +459,7 @@ class LearningGenerator:
                 "kind": "jlpt",
                 "source": "claude",
                 "estimated": True,
-                "basis": f"Claude가 {level} 수준으로 추정해 고른 어휘입니다. JLPT 공식 목록이 아니며, 구성 한자의 개별 급수를 뜻하지 않습니다.",
+                "basis": f"AI가 {level} 수준으로 추정해 고른 어휘입니다. JLPT 공식 목록이 아니며, 구성 한자의 개별 급수를 뜻하지 않습니다.",
             })
         if not entries:
             raise InvalidOutputError
@@ -416,6 +480,26 @@ def response_text(response: Any) -> str:
         elif block_type == "text":
             parts.append(getattr(block, "text", ""))
     text = "".join(parts).strip()
+    if not text:
+        raise InvalidOutputError
+    return text
+
+
+def chat_response_text(response: Any) -> str:
+    """Return the JSON text of an OpenAI-compatible Chat Completions response."""
+    choices = getattr(response, "choices", None) or []
+    if not choices:
+        raise InvalidOutputError
+    choice = choices[0]
+    message = getattr(choice, "message", None)
+    finish_reason = getattr(choice, "finish_reason", None)
+    if getattr(message, "refusal", None) or finish_reason == "content_filter":
+        raise RefusedError
+    if finish_reason == "length":
+        raise InvalidOutputError
+    text = (getattr(message, "content", None) or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`").removeprefix("json").strip()
     if not text:
         raise InvalidOutputError
     return text

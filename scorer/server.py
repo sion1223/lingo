@@ -647,14 +647,14 @@ def _learning_error(status_code, code, message):
 
 @app.post('/learn/generate')
 def learn_generate(req: LearnGenerateRequest, request: Request):
-    """Claude가 만든 일상회화 문장(1~2개) 또는 JLPT 어휘(2~3개)."""
+    """AI가 만든 일상회화 문장(1~2개) 또는 JLPT 어휘(2~3개)."""
     if req.kind == 'daily' and not req.situation:
         raise _learning_error(422, 'SITUATION_REQUIRED', '연습하고 싶은 상황을 입력해 주세요.')
     if req.kind == 'jlpt' and req.level is None:
         raise _learning_error(422, 'LEVEL_REQUIRED', 'JLPT 급수를 골라 주세요.')
     generator = get_learning_generator()
     if not generator.configured():
-        raise _learning_error(503, 'AI_NOT_CONFIGURED', '서버에 Claude API 키가 아직 설정되지 않았어요.')
+        raise _learning_error(503, 'AI_NOT_CONFIGURED', '서버에 AI API 키가 아직 설정되지 않았어요.')
     limit_reason = _learning_request_budget.consume(_teacher_client_key(request))
     if limit_reason == 'daily_budget_exceeded':
         raise _learning_error(429, 'AI_DAILY_LIMIT', '오늘 AI 생성 횟수를 모두 썼어요. 내일 다시 시도해 주세요.')
