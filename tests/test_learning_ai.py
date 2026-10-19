@@ -208,3 +208,20 @@ def test_generate_route_explains_missing_key(monkeypatch):
 
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "AI_NOT_CONFIGURED"
+
+
+def test_jlpt_keeps_only_common_dictionary_words_with_their_reading():
+    available = AVAILABLE | frozenset("排枇請観駅員")
+    generator, client = generator_for(chat_reply({"words": [
+        {"word": "排枇", "reading": "はいひ", "korean": "?", "example_japanese": "", "example_korean": ""},
+        {"word": "準備", "reading": "じゅんぶ", "korean": "준비", "example_japanese": "", "example_korean": ""},
+        {"word": "駅員", "reading": "エキイン", "korean": "역무원", "example_japanese": "", "example_korean": ""},
+        {"word": "確認", "reading": "かくにん", "korean": "확인", "example_japanese": "", "example_korean": ""},
+    ]}))
+
+    entries = generator.generate_jlpt("N4", [], available)
+
+    assert [entry["text"] for entry in entries] == ["駅員", "確認"]
+    assert learning_ai.is_common_word("準備", "じゅんび") is True
+    assert learning_ai.is_common_word("請観", "せいかん") is False
+    assert "Pick 5 different" in client.chat.completions.calls[0]["messages"][1]["content"]

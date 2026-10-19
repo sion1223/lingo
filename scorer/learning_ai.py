@@ -18,6 +18,7 @@ the endpoints.
 
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import random
@@ -39,6 +40,9 @@ SERVER_FALLBACK_MODEL_PREFIXES = ("claude-opus", "claude-fable", "claude-sonnet"
 JLPT_LEVELS = ("N5", "N4", "N3", "N2", "N1")
 DAILY_COUNT = 2
 JLPT_COUNT = 3
+# Ask for extra candidates: words missing from the common-word index are dropped.
+JLPT_CANDIDATES = 5
+WORD_INDEX_PATH = Path(__file__).resolve().parent / "data" / "jmdict-common-words.json.gz"
 MAX_TEXT_CHARS = 24
 MAX_WORD_CHARS = 6
 MAX_EXCLUDED_WORDS = 40
@@ -211,6 +215,29 @@ def is_kana(char: str) -> bool:
 
 def is_kanji(char: str) -> bool:
     return is_practice_char(char) and not is_kana(char)
+
+
+_word_index: dict[str, list[str]] | None = None
+_word_index_lock = threading.Lock()
+
+
+def common_word_readings() -> dict[str, list[str]]:
+    """JMdict common words (kanji form -> hiragana readings); see scripts/build_jmdict_index.py."""
+    global _word_index
+    with _word_index_lock:
+        if _word_index is None:
+            with gzip.open(WORD_INDEX_PATH, "rt", encoding="utf-8") as handle:
+                _word_index = json.load(handle)["words"]
+    return _word_index
+
+
+def to_hiragana(text: str) -> str:
+    return "".join(chr(ord(char) - 0x60) if "ァ" <= char <= "ヶ" else char for char in text)
+
+
+def is_common_word(word: str, reading: str) -> bool:
+    readings = common_word_readings().get(word)
+    return bool(readings) and to_hiragana(reading.replace(" ", "")) in readings
 
 
 def practice_chars(text: str) -> list[str]:
@@ -423,9 +450,10 @@ class LearningGenerator:
             f"Level: JLPT {level}\n"
             f"Theme hint for variety: {theme}\n"
             f"Do not use any of these words: {', '.join(excluded) if excluded else '(none)'}\n\n"
-            f"Pick {JLPT_COUNT} different Japanese vocabulary words written with kanji that a learner "
-            f"preparing for JLPT {level} should know. Avoid the most obvious first-lesson words so "
-            "repeated requests stay varied; the theme hint is only a nudge.\n"
+            f"Pick {JLPT_CANDIDATES} different Japanese vocabulary words written with kanji that a learner "
+            f"preparing for JLPT {level} should know. Use only real, common words found in standard "
+            "Japanese dictionaries; never invent kanji combinations. Avoid the most obvious "
+            "first-lesson words so repeated requests stay varied; the theme hint is only a nudge.\n"
             "For each: word (as normally written, 1-4 characters, at least one kanji), reading "
             "(hiragana), korean (its Korean meaning), example_japanese (a short natural example "
             "sentence using the word, at most 20 characters), example_korean (its Korean translation)."
@@ -443,6 +471,7 @@ class LearningGenerator:
                 and any(is_kanji(char) for char in word)
                 and _valid_reading(reading)
                 and meaning
+                and is_common_word(word, reading)
             ):
                 continue
             if word in excluded or any(entry["text"] == word for entry in entries):

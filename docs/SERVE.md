@@ -43,7 +43,9 @@
 | FastAPI 서버 | `LEARNING_AI_DAILY_REQUEST_LIMIT` | 프로세스 전체 UTC 일일 생성 요청 상한, 기본 300(1~20,000) |
 
 `anthropic` 패키지는 학습 메뉴 생성의 Claude 경로에만 쓰고, Gemini 등 다른 모델은 이미 있는 `openai`
-패키지로 BAZE를 호출한다(JSON Schema `response_format`, strict). 키가 없거나 호출이 실패하면 `/learn/generate`가
+패키지로 BAZE를 호출한다(JSON Schema `response_format`, strict). JLPT 단어는 후보 5개를 받아
+JMdict 흔한 단어 색인(`scorer/data/jmdict-common-words.json.gz`, `python scripts/build_jmdict_index.py`로
+갱신)에 같은 읽기로 있는 단어만 최대 3개 남긴다. 모델이 지어낸 한자 조합을 걸러내기 위함이다. 키가 없거나 호출이 실패하면 `/learn/generate`가
 `AI_NOT_CONFIGURED` 등 오류 코드를 돌려주고, 화면은 기존 편집자 예시로 대신 보여 준다.
 `/health.learning_ai_ready`로 키 설정 여부를 확인할 수 있다. Anthropic API를 직접 호출하면서
 Opus·Sonnet·Fable 모델을 쓸 때만 server-side fallback(`fallbacks: "default"`)을 켠다. Haiku에는
