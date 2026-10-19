@@ -113,3 +113,26 @@ def test_duplicate_and_zero_length_points_are_safe():
 def test_excessive_point_count_is_rejected_before_geometry_work():
     with pytest.raises(InvalidStroke, match="point limit"):
         sanitize_points([[0.2, 0.2]] * 4097)
+
+
+def test_length_cues_need_a_real_distance_not_just_a_ratio():
+    from scorer.realtime import CausalMatch, _select_cue
+
+    tick = np.linspace((0.5, 0.3), (0.56, 0.36), 12)
+    t = np.linspace(0.0, 1.0, 60)[:, None]
+    wobble = 0.006 * np.sin(t * 30)
+    shaky = np.hstack([0.5 + 0.06 * t + wobble, 0.3 + 0.06 * t - wobble])
+    overshoot = np.linspace((0.5, 0.3), (0.5 + 0.06 * 2.2, 0.3 + 0.06 * 2.2), 60)
+
+    def cue(stroke):
+        metrics = compute_stroke_metrics(stroke, tick)
+        found = _select_cue(CausalMatch(0, 0, metrics, 1.0), None)
+        return metrics, found.cue.code if found else None
+
+    shaky_metrics, shaky_code = cue(shaky)
+    assert shaky_metrics.length_ratio > 1.34
+    assert shaky_code != "TOO_LONG"
+
+    long_metrics, long_code = cue(overshoot)
+    assert long_metrics.end_overshoot > 0.04
+    assert long_code in {"TOO_LONG", "END_OFFSET"}

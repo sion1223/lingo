@@ -39,6 +39,11 @@ MAX_POINTS = 4096
 BOUNDS_TOLERANCE = 0.25
 MIN_STEP = 0.00025
 EPSILON = 1e-9
+# Length cues need a real distance as well as a ratio; ratios alone flag tiny
+# dots and ticks for hand shake. Mirrors web/coach/policy.js.
+LONG_MIN_OVERSHOOT = 0.04
+LONG_MIN_EXCESS = 0.04
+SHORT_MIN_DEFICIT = 0.04
 
 
 class InvalidStroke(ValueError):
@@ -80,6 +85,8 @@ class GeometryMetrics:
     form_target_segment: tuple[tuple[float, float], ...]
     aligned_user: np.ndarray
     aligned_template: np.ndarray
+    length_excess: float = 0.0
+    end_overshoot: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -160,6 +167,15 @@ def _arc_length(points: np.ndarray) -> float:
     if len(points) < 2:
         return 0.0
     return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+
+
+def _end_overshoot(user: np.ndarray, template: np.ndarray) -> float:
+    """How far the user's end passes the guide's end along its final direction."""
+    direction = template[-1] - template[max(0, len(template) - 4)]
+    norm = float(np.linalg.norm(direction))
+    if norm < EPSILON:
+        return 0.0
+    return float(np.dot(user[-1] - template[-1], direction) / norm)
 
 
 def banded_dtw(first: np.ndarray, second: np.ndarray, band_ratio: float = 0.3) -> DtwResult:
@@ -343,6 +359,8 @@ def compute_stroke_metrics(user_points: Sequence, template_points: Sequence) -> 
         ),
         aligned_user=user,
         aligned_template=template,
+        length_excess=_arc_length(user) - _arc_length(template),
+        end_overshoot=_end_overshoot(user, template),
     )
 
 
@@ -569,7 +587,7 @@ def _select_cue(
                 vector=metrics.end_vector,
             )
         )
-    if metrics.length_ratio < 0.72:
+    if metrics.length_ratio < 0.72 and -metrics.length_excess > SHORT_MIN_DEFICIT:
         candidates.append(
             _candidate(
                 "TOO_SHORT",
@@ -581,7 +599,11 @@ def _select_cue(
                 vector=metrics.end_vector,
             )
         )
-    if metrics.length_ratio > 1.34:
+    if (
+        metrics.length_ratio > 1.34
+        and metrics.length_excess > LONG_MIN_EXCESS
+        and metrics.end_overshoot > LONG_MIN_OVERSHOOT
+    ):
         candidates.append(
             _candidate(
                 "TOO_LONG",

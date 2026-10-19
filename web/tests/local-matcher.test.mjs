@@ -205,3 +205,24 @@ test("invalid and degenerate strokes fail safely", () => {
     assert.equal(result.engine, "geometry-only");
   }
 });
+
+test("a short tick traced with hand shake is not TOO_LONG, a real overshoot is", () => {
+  const template = Array.from({ length: 12 }, (_, index) => [0.5 + 0.06 * index / 11, 0.3 + 0.06 * index / 11]);
+  const shaky = Array.from({ length: 60 }, (_, index) => {
+    const t = index / 59;
+    const wobble = 0.006 * Math.sin(t * 30);
+    return [0.5 + 0.06 * t + wobble, 0.3 + 0.06 * t - wobble];
+  });
+  const overshoot = Array.from({ length: 60 }, (_, index) => {
+    const t = index / 59 * 2.2;
+    return [0.5 + 0.06 * t, 0.3 + 0.06 * t];
+  });
+
+  const steady = analyzeCompletedStroke({ stroke: shaky, templateStrokes: [template], expectedTemplateIndex: 0 });
+  assert.ok(steady.metrics.lengthRatio > 1.34, "the ratio alone would have said TOO_LONG");
+  assert.notEqual(steady.primaryCue?.code, "TOO_LONG");
+
+  const long = analyzeCompletedStroke({ stroke: overshoot, templateStrokes: [template], expectedTemplateIndex: 0 });
+  assert.ok(long.metrics.endOvershoot > 0.04);
+  assert.equal(long.primaryCue?.code === "TOO_LONG" || long.primaryCue?.code === "END_OFFSET", true);
+});

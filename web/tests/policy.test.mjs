@@ -69,8 +69,20 @@ test("a translated but correctly shaped stroke gets a nudge instead of a retry",
 });
 
 test("length thresholds expose stable TOO_SHORT and TOO_LONG codes", () => {
-  assert.equal(selectPrimaryCue(metrics({ lengthRatio: 0.6 })).code, "TOO_SHORT");
-  assert.equal(selectPrimaryCue(metrics({ lengthRatio: 1.5 })).code, "TOO_LONG");
+  assert.equal(selectPrimaryCue(metrics({ lengthRatio: 0.6, lengthExcess: -0.3 })).code, "TOO_SHORT");
+  assert.equal(
+    selectPrimaryCue(metrics({ lengthRatio: 1.5, lengthExcess: 0.3, endOvershoot: 0.2 })).code,
+    "TOO_LONG",
+  );
+});
+
+test("length cues need a real distance, not just a ratio", () => {
+  // A dot traced with hand shake: long ratio, but the end never passes the guide.
+  assert.equal(selectPrimaryCue(metrics({ lengthRatio: 1.6, lengthExcess: 0.05, endOvershoot: 0.01 })), null);
+  // A tiny dot that is a bit longer but by less than the minimum distance.
+  assert.equal(selectPrimaryCue(metrics({ lengthRatio: 1.6, lengthExcess: 0.03, endOvershoot: 0.03 })), null);
+  // A tiny tick stopped a hair early.
+  assert.equal(selectPrimaryCue(metrics({ lengthRatio: 0.6, lengthExcess: -0.02 })), null);
 });
 
 test("hysteresis waits 150ms, releases below 0.60, and applies cooldown", () => {

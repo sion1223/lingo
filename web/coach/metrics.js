@@ -56,6 +56,19 @@ export function strokeArcLength(points) {
   return total;
 }
 
+// How far the user's end goes past the guide's end along the guide's final
+// direction (negative when the stroke stops before the end).
+export function endOvershoot(user, template) {
+  const tail = template.at(-1);
+  const before = template[Math.max(0, template.length - 4)];
+  const dx = tail[0] - before[0];
+  const dy = tail[1] - before[1];
+  const norm = Math.hypot(dx, dy);
+  if (norm < EPSILON) return 0;
+  const end = user.at(-1);
+  return ((end[0] - tail[0]) * dx + (end[1] - tail[1]) * dy) / norm;
+}
+
 export function resampleStroke(points, count = DEFAULT_SAMPLE_COUNT) {
   if (!Number.isInteger(count) || count < 2) {
     throw new RangeError("resample count must be an integer greater than one");
@@ -303,6 +316,8 @@ export function computeStrokeMetrics(userPoints, templatePoints, options = {}) {
     directionCosine: direction,
     // Fixed-density paths keep high-rate pen jitter from becoming fake length.
     lengthRatio: strokeArcLength(user) / Math.max(strokeArcLength(template), EPSILON),
+    lengthExcess: strokeArcLength(user) - strokeArcLength(template),
+    endOvershoot: endOvershoot(user, template),
     bboxShift: {
       dx: templateBox.center[0] - userBox.center[0],
       dy: templateBox.center[1] - userBox.center[1],

@@ -23,6 +23,11 @@ export const DEFAULT_POLICY = Object.freeze({
   shortRetry: 0.48,
   longNudge: 1.34,
   longRetry: 1.72,
+  // Ratios alone flag tiny dots and ticks for hand shake, so length cues also
+  // need a real distance: an end that passes the guide's end, or a clear gap.
+  longMinOvershoot: 0.04,
+  longMinExcess: 0.04,
+  shortMinDeficit: 0.04,
   recallFormNudge: 0.08,
   recallFormRetry: 0.20,
 });
@@ -162,7 +167,9 @@ export function selectPrimaryCue(metrics, context = {}, thresholds = DEFAULT_POL
       vector: metrics.endVector,
     }));
   }
-  if (metrics.lengthRatio < thresholds.shortNudge) {
+  const lengthExcess = Number.isFinite(metrics.lengthExcess) ? metrics.lengthExcess : 0;
+  const endOvershoot = Number.isFinite(metrics.endOvershoot) ? metrics.endOvershoot : 0;
+  if (metrics.lengthRatio < thresholds.shortNudge && -lengthExcess > thresholds.shortMinDeficit) {
     cues.push(candidate({
       code: ERROR_CODES.TOO_SHORT,
       priority: 52,
@@ -177,7 +184,11 @@ export function selectPrimaryCue(metrics, context = {}, thresholds = DEFAULT_POL
       vector: metrics.endVector,
     }));
   }
-  if (metrics.lengthRatio > thresholds.longNudge) {
+  if (
+    metrics.lengthRatio > thresholds.longNudge
+    && lengthExcess > thresholds.longMinExcess
+    && endOvershoot > thresholds.longMinOvershoot
+  ) {
     cues.push(candidate({
       code: ERROR_CODES.TOO_LONG,
       priority: 52,
