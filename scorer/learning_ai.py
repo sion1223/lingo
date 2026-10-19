@@ -107,7 +107,8 @@ JLPT_SCHEMA = {
 
 
 class LearningAiError(Exception):
-    status_code = 502
+    # Not 502: the RunPod proxy replaces 502 responses with its own HTML page.
+    status_code = 503
     code = "AI_UNAVAILABLE"
     message = "AI 생성에 실패했어요. 잠시 후 다시 시도해 주세요."
 
