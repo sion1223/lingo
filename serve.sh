@@ -1,6 +1,8 @@
 #!/bin/bash
 # lingo 채점 서버 기동 스크립트 — pod가 켜질 때마다 실행돼도 안전(멱등).
 # /workspace 는 볼륨이라 stop/start 후에도 유지된다.
+# SSH 세션에는 pod 환경변수(ANTHROPIC_API_KEY 등)가 없으므로 RunPod가 남긴 목록을 읽는다.
+[ -f /etc/rp_environment ] && . /etc/rp_environment
 cd /workspace/lingo || exit 1
 export HF_HOME=/workspace/hf
 export BUILD_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
