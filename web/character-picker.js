@@ -1,5 +1,6 @@
 const JAPANESE_READING_SEPARATORS = /[.\-‐‑‒–—・･\s]/gu;
 const ROMAJI_QUERY = /^[a-zāīūēō'\-\s]+$/iu;
+const HANGUL_QUERY = /^[가-힣\s]+$/u;
 
 export const CHARACTER_CATEGORIES = Object.freeze([
   "ALL",
@@ -216,10 +217,39 @@ export function primaryRomaji(character, readingIndex = {}) {
   return reading ? kanaToRomaji(reading) : "";
 }
 
-function queryMatchRank(character, query, readingIndex) {
+export function meaningRecord(character, meaningIndex = {}) {
+  const record = meaningIndex?.[character];
+  if (!Array.isArray(record)) return null;
+  const [hun = "", on = "", kun = ""] = record;
+  return hun || on || kun ? { hun, on, kun } : null;
+}
+
+export function primaryHun(character, meaningIndex = {}) {
+  return meaningRecord(character, meaningIndex)?.hun.split(",")[0].trim() ?? "";
+}
+
+function hangulMatchRank(character, query, meaningIndex) {
+  const hun = meaningRecord(character, meaningIndex)?.hun;
+  if (!hun) return null;
+  const needle = query.replace(/\s+/gu, " ");
+  let best = null;
+  for (const sense of hun.split(",")) {
+    const words = sense.trim().split(/\s+/u);
+    const sound = words.length > 1 ? words.at(-1) : "";
+    const gloss = words.slice(0, sound ? -1 : undefined).join(" ");
+    if (sense.trim() === needle || gloss === needle) return 1;
+    if (sound === needle || gloss.startsWith(needle)) best = 2;
+  }
+  return best;
+}
+
+function queryMatchRank(character, query, readingIndex, meaningIndex = {}) {
   const normalizedQuery = String(query ?? "").normalize("NFKC").trim();
   if (!normalizedQuery) return 0;
   if (character === normalizedQuery) return 0;
+  if (HANGUL_QUERY.test(normalizedQuery)) {
+    return hangulMatchRank(character, normalizedQuery, meaningIndex);
+  }
 
   const readings = [character, ...readingValues(readingIndex, character)];
   if (ROMAJI_QUERY.test(normalizedQuery)) {
@@ -246,7 +276,7 @@ function queryMatchRank(character, query, readingIndex) {
   return prefixMatch ? 2 : null;
 }
 
-export function searchCharacters(query, characters, readingIndex = {}) {
+export function searchCharacters(query, characters, readingIndex = {}, meaningIndex = {}) {
   const source = splitCharacters(characters);
   const normalizedQuery = String(query ?? "").normalize("NFKC").trim();
   if (!normalizedQuery) return source;
@@ -255,7 +285,7 @@ export function searchCharacters(query, characters, readingIndex = {}) {
     .map((character, index) => ({
       character,
       index,
-      rank: queryMatchRank(character, normalizedQuery, readingIndex),
+      rank: queryMatchRank(character, normalizedQuery, readingIndex, meaningIndex),
     }))
     .filter(({ rank }) => rank !== null)
     .sort((left, right) => left.rank - right.rank || left.index - right.index)
@@ -266,6 +296,7 @@ export class CharacterPickerModel {
   constructor(characters = [], readingIndex = {}, catalogIndex = {}) {
     this.characters = splitCharacters(characters);
     this.readingIndex = readingIndex;
+    this.meaningIndex = {};
     this.catalogIndex = catalogIndex;
     this.category = "ALL";
     this.query = "";
@@ -281,6 +312,11 @@ export class CharacterPickerModel {
 
   setReadingIndex(readingIndex = {}) {
     this.readingIndex = readingIndex;
+    return this.refresh();
+  }
+
+  setMeaningIndex(meaningIndex = {}) {
+    this.meaningIndex = meaningIndex;
     return this.refresh();
   }
 
@@ -300,7 +336,12 @@ export class CharacterPickerModel {
   }
 
   refresh() {
-    const searched = searchCharacters(this.query, this.characters, this.readingIndex);
+    const searched = searchCharacters(
+      this.query,
+      this.characters,
+      this.readingIndex,
+      this.meaningIndex,
+    );
     this.matches = filterCharactersByCategory(
       searched,
       this.category,

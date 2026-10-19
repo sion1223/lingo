@@ -113,3 +113,31 @@ test("catalog categories, ordering, and displayed romaji share one index", () =>
   assert.deepEqual(picker.setCategory("JOYO"), ["歳"]);
   assert.deepEqual(picker.setCategory("KANA"), ["あ"]);
 });
+
+test("Korean 훈음 index labels kanji and makes them searchable by meaning or sound", async () => {
+  const { meaningRecord, primaryHun } = await import("../character-picker.js");
+  const meaningIndex = JSON.parse(readFileSync(
+    new URL("../data/kanji-meanings.json", import.meta.url),
+    "utf8",
+  )).meanings;
+
+  assert.deepEqual(meaningRecord("学", meaningIndex), {
+    hun: "배울 학",
+    on: "ガク",
+    kun: "まな(ぶ)",
+  });
+  assert.equal(primaryHun("国", meaningIndex), "나라 국");
+  assert.equal(primaryHun("永", meaningIndex), "길 영");
+  assert.equal(meaningRecord("あ", meaningIndex), null);
+
+  const joyo = JSON.parse(readFileSync(
+    new URL("../data/kanji-catalog.json", import.meta.url),
+    "utf8",
+  )).entries.map((entry) => entry.character);
+  const missing = joyo.filter((character) => !meaningRecord(character, meaningIndex)?.hun);
+  assert.deepEqual(missing, []);
+
+  assert.deepEqual(searchCharacters("배울", "学国水", {}, meaningIndex), ["学"]);
+  assert.deepEqual(searchCharacters("나라 국", "学国水", {}, meaningIndex), ["国"]);
+  assert.deepEqual(searchCharacters("수", "学国水", {}, meaningIndex), ["水"]);
+});

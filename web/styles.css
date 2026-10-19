@@ -327,7 +327,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #84adff; outline-
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 70px;
+  height: 78px;
   min-width: 0;
   padding: 5px 3px 4px;
   border-radius: 8px;
@@ -351,6 +351,21 @@ button:focus-visible, input:focus-visible { outline: 3px solid #84adff; outline-
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.pchar-meaning {
+  width: 100%;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #3f3a33;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pchar-meaning + .pchar-reading { margin-top: 1px; }
 
 .pchar-category {
   position: absolute;
@@ -495,6 +510,9 @@ button:disabled, select:disabled { opacity: 0.65; cursor: default; }
 #study-toggle { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: min(100%, 520px); min-height: 60px; margin: 0 auto; padding: 10px 16px; border: 1px solid #d6d0c5; background: #fffcf7; text-align: left; }
 .current-practice { display: flex; align-items: center; gap: 12px; min-width: 0; }
 #active-character { font-size: 30px; line-height: 1; }
+.active-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#active-meaning { overflow: hidden; color: #2f2b26; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+#active-meaning:empty { display: none; }
 #active-mode { color: #625c52; font-size: 13px; }
 .settings-label { display: flex; gap: 10px; align-items: center; font-size: 13px; color: #174b9b; }
 .settings-chevron { font-size: 22px; line-height: 1; }
@@ -514,6 +532,8 @@ button:disabled, select:disabled { opacity: 0.65; cursor: default; }
 .writing-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .writing-actions button { padding: 0 8px; font-size: 14px; }
 .writing-actions #hint { grid-column: 1 / -1; }
+.writing-actions #hint:disabled { opacity: 0.55; cursor: not-allowed; }
+.writing-actions #next-stage { grid-column: 1 / -1; background: #175cd3; color: #fff; font-weight: 600; }
 @media (max-width: 780px) {
   main { max-width: 520px; }
   #study-settings .study-layout { grid-template-columns: minmax(0, 1fr); }

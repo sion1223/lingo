@@ -13,6 +13,8 @@ import {
   CharacterPickerModel,
   categoryForCharacter,
   createCatalogIndex,
+  meaningRecord,
+  primaryHun,
   primaryRomaji,
   sortCharactersByCatalog,
   splitCharacters,
@@ -66,6 +68,7 @@ const elements = {
   statusText: document.getElementById("stxt"),
   stageBadge: document.getElementById("stage-badge"),
   hint: document.getElementById("hint"),
+  nextStage: document.getElementById("next-stage"),
   picker: document.getElementById("picker"),
   pickerGrid: document.getElementById("picker-grid"),
   pickerInfo: document.getElementById("picker-info"),
@@ -107,6 +110,7 @@ let shownCharacters = 0;
 let characterCatalogPromise = null;
 let characterCatalogIndex = Object.create(null);
 let characterReadingIndex = Object.create(null);
+let characterMeaningIndex = Object.create(null);
 let pickerComposing = false;
 let teacherNetworkAvailable = false;
 let currentTeacherContext = null;
@@ -116,12 +120,25 @@ const characterChunkSize = 400;
 const pickerModel = new CharacterPickerModel(allCharacters);
 const readingIndexUrl = new URL("./data/kanji-readings.json", import.meta.url);
 const characterCatalogUrl = new URL("./data/kanji-catalog.json", import.meta.url);
+const meaningIndexUrl = new URL("./data/kanji-meanings.json", import.meta.url);
 const studyToggle = document.getElementById("study-toggle");
 const studySettings = document.getElementById("study-settings");
 const studySurface = document.getElementById("study-surface");
 
+function meaningSummary(character) {
+  const record = meaningRecord(character, characterMeaningIndex);
+  if (!record) return "";
+  const readings = [record.on, record.kun].filter(Boolean).join(" / ");
+  return [record.hun, readings].filter(Boolean).join(" · ");
+}
+
 function updatePracticeSummary() {
-  document.getElementById("active-character").textContent = templateCharacter || currentCharacter() || "—";
+  const character = templateCharacter || currentCharacter() || "";
+  document.getElementById("active-character").textContent = character || "—";
+  const summary = meaningSummary(character);
+  const meaning = document.getElementById("active-meaning");
+  meaning.textContent = summary;
+  meaning.title = summary;
   document.getElementById("active-mode").textContent = (stage === 1 ? "따라쓰기" : "암기쓰기")
     + (templateVariant === "default" ? "" : " · 대체 자형");
 }
@@ -406,7 +423,9 @@ function setStage(nextStage) {
   elements.stageBadge.textContent = (
     stage === 1 ? "1단계: 궤적 따라쓰기" : "2단계: 위치 자유 · 모양 쓰기"
   );
-  elements.hint.hidden = stage !== 2;
+  elements.hint.disabled = stage !== 2;
+  elements.hint.textContent = stage === 2 ? "한 획 보기" : "한 획 보기 · 2단계";
+  elements.nextStage.hidden = true;
   updatePracticeSummary();
 }
 
@@ -638,10 +657,11 @@ function renderDiagnosis(diagnosis, { autoRetry = false } = {}) {
       setCoachMessage(
         stage === 2
           ? "글자를 완성했어요. 파란 점선은 쓴 위치와 크기에 맞춘 예시입니다."
-          : "글자를 완성했어요. 원하면 최종 채점을 확인해 보세요.",
+          : "글자를 완성했어요. 최종 채점을 확인하거나 2단계로 넘어가세요.",
         "success",
         "✓",
       );
+      if (stage === 1) elements.nextStage.hidden = false;
     } else {
       setCoachMessage(
         `좋아요. ${diagnosis.nextAction.templateIndex + 1}번 획을 이어서 써 보세요.`,
@@ -722,6 +742,7 @@ function resetVisibleAttempt(message = "첫 획부터 천천히 써 보세요.")
   currentPointerId = null;
   lastReport = null;
   elements.result.replaceChildren();
+  elements.nextStage.hidden = true;
   elements.busyOverlay.style.display = "none";
   coachOverlay.clear();
   setCoachMessage(message, "success", "○");
@@ -1003,6 +1024,7 @@ document.getElementById("undo").addEventListener("click", () => {
   clearTeacherState({ clearContext: true, resetHistory: true });
   lastReport = null;
   elements.result.replaceChildren();
+  elements.nextStage.hidden = true;
   elements.busyOverlay.style.display = "none";
   coachOverlay.clear();
   setCoachMessage("마지막 획을 지웠어요. 같은 획부터 다시 써 보세요.", "nudge", "↶");
@@ -1036,8 +1058,15 @@ elements.character.addEventListener("keydown", (event) => {
   }
 });
 
+elements.nextStage.addEventListener("click", () => {
+  void recordCurrentAttempt("cleared");
+  setStage(2);
+  resetVisibleAttempt("모양을 기억해 써 보세요. 막히면 한 획 보기로 도움을 받을 수 있습니다.");
+  elements.canvas.focus({ preventScroll: true });
+});
+
 elements.hint.addEventListener("click", () => {
-  if (!template) return;
+  if (stage !== 2 || !template) return;
   if (revealCount < template.length) revealCount += 1;
   lastReport = null;
   elements.result.replaceChildren();
@@ -1126,6 +1155,7 @@ function renderCharacterChunk() {
     const metadata = characterCatalogIndex[character];
     const category = categoryForCharacter(character, characterCatalogIndex);
     const reading = primaryRomaji(character, characterReadingIndex);
+    const hun = primaryHun(character, characterMeaningIndex);
     const item = document.createElement("div");
     item.className = "pchar";
     item.id = `picker-option-${index}`;
@@ -1135,6 +1165,7 @@ function renderCharacterChunk() {
     item.setAttribute("aria-selected", String(index === pickerModel.activeIndex));
     const description = [
       character,
+      hun,
       reading,
       CHARACTER_CATEGORY_LABELS[category],
       metadata?.strokes ? `${metadata.strokes}획` : "",
@@ -1154,7 +1185,14 @@ function renderCharacterChunk() {
     classification.textContent = category === "JOYO"
       ? "상용"
       : CHARACTER_CATEGORY_LABELS[category];
-    item.append(glyph, romanized, classification);
+    if (hun) {
+      const meaning = document.createElement("span");
+      meaning.className = "pchar-meaning";
+      meaning.textContent = hun;
+      item.append(glyph, meaning, romanized, classification);
+    } else {
+      item.append(glyph, romanized, classification);
+    }
     if (index === pickerModel.activeIndex) item.classList.add("active");
     fragment.appendChild(item);
   }
@@ -1229,6 +1267,19 @@ function closeCharacterPicker({ focusWriting = false } = {}) {
   if (focusWriting) setStudySettingsOpen(false, { focusWriting: true });
 }
 
+let meaningIndexPromise = null;
+
+function loadMeaningIndex() {
+  meaningIndexPromise ??= fetch(meaningIndexUrl)
+    .then(async (response) => {
+      if (!response.ok) throw new Error("meaning index unavailable");
+      characterMeaningIndex = (await response.json()).meanings ?? Object.create(null);
+      updatePracticeSummary();
+    })
+    .catch((error) => console.warn("kanji meanings unavailable", error));
+  return meaningIndexPromise;
+}
+
 async function loadCharacterCatalog() {
   if (characterCatalogPromise) return characterCatalogPromise;
   characterCatalogPromise = Promise.allSettled([
@@ -1241,6 +1292,7 @@ async function loadCharacterCatalog() {
       if (!response.ok) throw new Error("character catalog unavailable");
       return response.json();
     }),
+    loadMeaningIndex(),
   ]).then(([serverCatalog, readings, kanjiCatalog]) => {
     const serverCharacters = serverCatalog.status === "fulfilled"
       && serverCatalog.value.status === 200
@@ -1265,6 +1317,7 @@ async function loadCharacterCatalog() {
     pickerModel.setCatalogIndex(characterCatalogIndex);
     pickerModel.setCharacters(allCharacters);
     pickerModel.setReadingIndex(characterReadingIndex);
+    pickerModel.setMeaningIndex(characterMeaningIndex);
     refreshPickerSearch();
   });
   return characterCatalogPromise;
@@ -1404,9 +1457,9 @@ function renderScoreReport(body) {
     html += '<div class="msg">교정할 획이 없습니다 — 잘 썼습니다!</div>';
   }
   if (stage === 1) {
-    setStage(2);
-    html += '<div class="msg"><b>2단계</b> — 원하는 위치와 크기에서 모양을 기억해 써 보세요. '
-      + '시작 위치는 채점하지 않으며, 막히면 <b>한 획 보기</b>로 확인할 수 있습니다.</div>';
+    elements.nextStage.hidden = false;
+    html += '<div class="msg"><b>1단계 완료</b> — <b>2단계로 넘어가기</b>를 누르면 '
+      + '원하는 위치와 크기에서 모양을 기억해 씁니다. 막히면 <b>한 획 보기</b>를 쓸 수 있어요.</div>';
   }
   elements.result.innerHTML = html;
 }
@@ -1495,6 +1548,7 @@ void learningPanel.load().then((pack) => {
 });
 
 setStage(1);
+void loadMeaningIndex();
 configureCanvases();
 void refreshLocalHistory();
 loadTemplate();

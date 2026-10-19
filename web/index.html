@@ -19,7 +19,7 @@
   <h1 class="visually-hidden">링고 — 일본어 학습과 필기</h1>
   <header class="study-header">
     <button id="study-toggle" type="button" aria-expanded="false" aria-controls="study-settings">
-      <span class="current-practice"><span id="active-character" lang="ja">永</span><span id="active-mode">따라쓰기</span></span>
+      <span class="current-practice"><span id="active-character" lang="ja">永</span><span class="active-info"><span id="active-meaning"></span><span id="active-mode">따라쓰기</span></span></span>
       <span class="settings-label"><span id="study-toggle-label">학습·설정 열기</span><span class="settings-chevron" aria-hidden="true">⌄</span></span>
     </button>
   </header>
@@ -137,10 +137,11 @@
   </div>
 
   <div class="writing-actions" role="group" aria-label="필기 동작">
-    <button id="hint" type="button" hidden>한 획 보기</button>
+    <button id="hint" type="button" disabled title="2단계(암기쓰기)에서 사용할 수 있어요">한 획 보기 · 2단계</button>
     <button id="undo" type="button">한 획 지우기</button>
     <button id="clear" type="button">전체 지우기</button>
     <button id="go" type="button" aria-describedby="scoring-scope">채점하기</button>
+    <button id="next-stage" type="button" hidden>2단계로 넘어가기 →</button>
   </div>
 
   <div id="coach-feedback" data-tone="success" role="status" aria-live="polite">
@@ -166,9 +167,9 @@
       <div id="picker-top">
         <input
           id="picker-search"
-          placeholder="한자·가나·로마자 검색 후 Enter"
+          placeholder="한자·가나·로마자·뜻(예: 배울) 검색 후 Enter"
           autocomplete="off"
-          aria-label="한자·가나·로마자 검색"
+          aria-label="한자·가나·로마자·한국어 뜻 검색"
           aria-controls="picker-grid"
         >
         <button id="picker-close" type="button">닫기</button>
@@ -191,6 +192,9 @@
         학년·획수·사용빈도·한자 읽기:
         <a href="https://www.edrdg.org/wiki/index.php/KANJIDIC_Project"
           target="_blank" rel="noreferrer">EDRDG KANJIDIC2</a>
+        · 훈음:
+        <a href="https://github.com/libhangul/libhangul"
+          target="_blank" rel="noreferrer">libhangul</a>
         · 교육한자 1~6학년 뒤에 나머지 상용한자 표시 · Enter로 확정
       </div>
     </div>
