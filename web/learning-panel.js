@@ -74,9 +74,10 @@ export function normalizeGeneratedEntry(entry, index = 0) {
 }
 
 export class LearningPanel {
-  constructor({ onCharacter, onVariant, onMode, requestGeneration }) {
+  constructor({ onCharacter, onVariant, onMode, onSentencePractice, requestGeneration }) {
     this.onCharacter = onCharacter;
     this.onVariant = onVariant;
+    this.onSentencePractice = onSentencePractice;
     this.requestGeneration = requestGeneration;
     this.pack = null;
     this.entry = null;
@@ -111,6 +112,10 @@ export class LearningPanel {
     $("example-font").addEventListener("change", () => void this.updateFont());
     $("practice-variant").addEventListener("change", () => this.onVariant($("practice-variant").value));
     $("practice-mode").addEventListener("change", () => onMode(Number($("practice-mode").value)));
+    $("sentence-start").addEventListener("click", () => this.toggleSentenceChoices());
+    for (const choice of document.querySelectorAll("[data-sentence-stage]")) {
+      choice.addEventListener("click", () => this.startSentence(Number(choice.dataset.sentenceStage)));
+    }
     $("jlpt-notice").textContent = JLPT_NOTICE;
     this.renderGroups();
   }
@@ -206,6 +211,22 @@ export class LearningPanel {
 
   canPractice(char, entry) {
     return entry.source === "claude" || Boolean(this.pack?.characters[char]);
+  }
+
+  sentenceCharacters(entry) {
+    return practiceCharacters(entry).filter((char) => this.canPractice(char, entry));
+  }
+
+  toggleSentenceChoices(open = $("sentence-stage-choices").hidden) {
+    $("sentence-stage-choices").hidden = !open;
+    $("sentence-start").setAttribute("aria-expanded", String(open));
+  }
+
+  startSentence(stage) {
+    if (!this.entry) return;
+    const chars = this.sentenceCharacters(this.entry);
+    this.toggleSentenceChoices(false);
+    if (chars.length) this.onSentencePractice(chars, stage, this.entry.id);
   }
 
   clearEntry() {
@@ -323,6 +344,10 @@ export class LearningPanel {
       item.disabled = !this.canPractice(char, entry);
       return item;
     }));
+    const sentenceChars = this.sentenceCharacters(entry);
+    $("sentence-start").disabled = sentenceChars.length === 0;
+    $("sentence-start").textContent = `문장 전체 연습 · ${sentenceChars.length}글자 ▶`;
+    this.toggleSentenceChoices(false);
     this.renderEntries();
     if (chars[0]) this.onCharacter(chars[0], entry.id);
   }

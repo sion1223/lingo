@@ -3,6 +3,18 @@ import { allowsRemoteScoring, practiceForm } from "./learning.js";
 import { LearningPanel } from "./learning-panel.js";
 import { advanceHint, hintedStrokeIndexes, NO_HINT } from "./hint-reveal.js";
 import {
+  advanceSentence,
+  autoHintStrokeIndex,
+  GUIDE_FULL,
+  nextStageAfter,
+  nextStepLabel,
+  sentenceCharacter,
+  sentenceProgressLabel,
+  stageConfig,
+  startSentencePractice,
+  withSentenceStage,
+} from "./practice-stages.js";
+import {
   applyServerStrokeResult,
   buildAttemptPayload,
   createStrokeResult,
@@ -105,6 +117,7 @@ let learningEntryId = null;
 let lastReport = null;
 let penSeen = false;
 let stage = 1;
+let sentenceSession = null;
 let hintReveal = NO_HINT;
 let framePending = false;
 let lastPartialAnalysisAt = Number.NEGATIVE_INFINITY;
@@ -146,7 +159,7 @@ function updatePracticeSummary() {
   meaning.textContent = summary;
   meaning.title = summary;
   renderRecommendations();
-  document.getElementById("active-mode").textContent = (stage === 1 ? "따라쓰기" : "암기쓰기")
+  document.getElementById("active-mode").textContent = stageConfig(stage).label
     + (templateVariant === "default" ? "" : " · 대체 자형");
 }
 
@@ -267,7 +280,7 @@ function localAttemptRecord({
     attemptId,
     attemptRevision: coach.lifecycle.revision,
     character,
-    mode: stage === 1 ? "trace" : "recall",
+    mode: stageConfig(stage).coachMode,
     startedAt: attemptStartedAt,
     savedAt,
     strokes,
@@ -455,7 +468,7 @@ function prepareTeacherExplanation(diagnosis, { countAttempt = true } = {}) {
     diagnosis,
     targetChar: currentCharacter(),
     nearestCompetitor: diagnosis.nearestCompetitor,
-    mode: stage === 1 ? "trace" : "recall",
+    mode: stageConfig(stage).coachMode,
     totalStrokes: template?.length ?? 1,
     attemptNumber: Math.max(1, strokes.length),
     sameErrorCount: repeatedErrorCount,
@@ -472,19 +485,57 @@ function prepareTeacherExplanation(diagnosis, { countAttempt = true } = {}) {
 }
 
 function setStage(nextStage) {
-  stage = nextStage;
+  const config = stageConfig(nextStage);
+  stage = config.stage;
   document.getElementById("practice-mode").value = String(stage);
   hintReveal = NO_HINT;
-  const mode = stage === 1 ? "trace" : "recall";
-  coach.setMode(mode);
-  document.body.dataset.practiceMode = mode;
-  elements.stageBadge.textContent = (
-    stage === 1 ? "1단계: 궤적 따라쓰기" : "2단계: 위치 자유 · 모양 쓰기"
-  );
-  elements.hint.disabled = stage !== 2;
-  elements.hint.textContent = stage === 2 ? "한 획 보기" : "한 획 보기 · 2단계";
+  coach.setMode(config.coachMode);
+  document.body.dataset.practiceMode = config.coachMode;
+  document.body.dataset.practiceStage = String(stage);
+  elements.stageBadge.textContent = config.badge;
+  elements.hint.disabled = !config.hintButton;
+  elements.hint.textContent = config.hintButton ? "한 획 보기" : "한 획 보기 · 2단계";
   elements.nextStage.hidden = true;
   updatePracticeSummary();
+}
+
+// The button after a finished character: next stage, or next sentence character.
+function showNextStep() {
+  const label = nextStepLabel(stage, sentenceSession);
+  elements.nextStage.hidden = !label;
+  if (label) elements.nextStage.textContent = label;
+}
+
+function renderSentenceProgress() {
+  document.getElementById("sentence-progress").hidden = !sentenceSession;
+  document.getElementById("sentence-progress-text").textContent = sentenceProgressLabel(sentenceSession);
+}
+
+async function loadSentenceCharacter() {
+  const character = sentenceCharacter(sentenceSession);
+  elements.character.value = character;
+  renderSentenceProgress();
+  if (character === templateCharacter) {
+    // loadTemplate only resets on a character change; restart here at the chosen stage.
+    void recordCurrentAttempt("cleared");
+    setStage(sentenceSession.stage);
+    resetVisibleAttempt(stageConfig(stage).startMessage);
+  }
+  await loadTemplate({ entryId: sentenceSession.entryId });
+}
+
+function startSentence(characters, chosenStage, entryId) {
+  const session = startSentencePractice(characters, chosenStage, entryId);
+  if (!session) return;
+  sentenceSession = session;
+  void loadSentenceCharacter();
+  setStudySettingsOpen(false, { focusWriting: true });
+}
+
+function endSentencePractice() {
+  sentenceSession = null;
+  renderSentenceProgress();
+  if (!elements.nextStage.hidden) showNextStep();
 }
 
 function configureCanvases() {
@@ -520,9 +571,13 @@ function drawStroke(points, color, width, dash = []) {
 function drawStrokeOrderGuide(
   points,
   order,
-  { color = "rgba(96, 103, 113, 0.24)", width = 7, dash = [], displayPath = null } = {},
+  {
+    color = "rgba(96, 103, 113, 0.24)", width = 7, dash = [], displayPath = null, markerOnly = false,
+  } = {},
 ) {
-  if (displayPath && templateDisplay && typeof Path2D !== "undefined") {
+  if (markerOnly) {
+    // Stage 2 hint: only the start badge and direction arrow, never the stroke path.
+  } else if (displayPath && templateDisplay && typeof Path2D !== "undefined") {
     // Draw the real curve in the same frame as the 12-point scoring template.
     // Font glyphs never enter this canvas or the coach's stroke data.
     inkContext.save();
@@ -594,7 +649,7 @@ function qualityColor(quality) {
 
 function completedRecallWriting() {
   return Boolean(
-    stage === 2
+    stageConfig(stage).coachMode === "recall"
     && template?.length
     && strokes.length > 0
     && coach.expectedTemplateIndex >= template.length
@@ -626,17 +681,24 @@ function redrawInk() {
   inkContext.stroke();
   inkContext.setLineDash([]);
 
-  const referenceTemplate = stage === 2 && template
+  const fullGuide = stageConfig(stage).guide === GUIDE_FULL;
+  const referenceTemplate = !fullGuide && template
     ? fitTemplateToWriting(template, strokes)
     : template;
   if (referenceTemplate) {
-    const visibleIndexes = stage === 1
+    const visibleIndexes = fullGuide
       ? template.map((_stroke, index) => index)
       : hintedStrokeIndexes(hintReveal, template.length);
     for (const index of visibleIndexes) {
       drawStrokeOrderGuide(referenceTemplate[index], index + 1, {
-        displayPath: stage === 1 ? templateDisplay?.paths[index] : null,
+        displayPath: fullGuide ? templateDisplay?.paths[index] : null,
       });
+    }
+    const autoHint = lastReport
+      ? null
+      : autoHintStrokeIndex(stage, coach.expectedTemplateIndex, template.length);
+    if (autoHint !== null && !visibleIndexes.includes(autoHint)) {
+      drawStrokeOrderGuide(referenceTemplate[autoHint], autoHint + 1, { markerOnly: true });
     }
   }
 
@@ -715,13 +777,13 @@ function renderDiagnosis(diagnosis, { autoRetry = false } = {}) {
   if (!diagnosis.primaryCue) {
     if (diagnosis.nextAction.type === "complete") {
       setCoachMessage(
-        stage === 2
+        stageConfig(stage).coachMode === "recall"
           ? "글자를 완성했어요. 파란 점선은 쓴 위치와 크기에 맞춘 예시입니다."
-          : "글자를 완성했어요. 최종 채점을 확인하거나 2단계로 넘어가세요.",
+          : "글자를 완성했어요. 최종 채점을 확인하거나 다음 단계로 넘어가세요.",
         "success",
         "✓",
       );
-      if (stage === 1) elements.nextStage.hidden = false;
+      showNextStep();
     } else {
       setCoachMessage(
         `좋아요. ${diagnosis.nextAction.templateIndex + 1}번 획을 이어서 써 보세요.`,
@@ -765,7 +827,7 @@ async function recordCurrentAttempt(
     attemptId,
     attemptRevision: coach.lifecycle.revision,
     character,
-    mode: stage === 1 ? "trace" : "recall",
+    mode: stageConfig(stage).coachMode,
     endedReason,
     startedAt: attemptStartedAt,
     endedAt,
@@ -840,6 +902,7 @@ async function loadTemplate({ forceNetwork = true, variantId, entryId } = {}) {
     return;
   }
   elements.character.value = character;
+  if (sentenceSession && character !== sentenceCharacter(sentenceSession)) endSentencePractice();
   const characterChanged = character !== templateCharacter;
   const nextVariant = variantId ?? (characterChanged ? "default" : templateVariant);
   const nextEntry = entryId === undefined ? (characterChanged ? null : learningEntryId) : entryId;
@@ -855,10 +918,12 @@ async function loadTemplate({ forceNetwork = true, variantId, entryId } = {}) {
     learningEntryId = nextEntry;
     templateDisplay = form?.display || null;
     template = form?.strokes || getBuiltinTemplate(character) || cachedTemplate(character);
-    setStage(1);
+    setStage(sentenceSession?.stage ?? 1);
     resetVisibleAttempt(
       template
-        ? "로컬 가이드가 준비됐어요. 서버가 꺼져 있어도 획별 교정을 받을 수 있습니다."
+        ? (sentenceSession
+          ? stageConfig(stage).startMessage
+          : "로컬 가이드가 준비됐어요. 서버가 꺼져 있어도 획별 교정을 받을 수 있습니다.")
         : "가이드를 불러오는 중입니다.",
     );
     coach.replaceTemplate(template);
@@ -945,7 +1010,7 @@ async function requestServerRefinement({
     sessionId,
     attemptId,
     char: character,
-    mode: stage === 1 ? "trace" : "recall",
+    mode: stageConfig(stage).coachMode,
     acceptedStrokes,
     currentStroke: completedStroke,
     expectedTemplateIndex,
@@ -1113,14 +1178,35 @@ elements.character.addEventListener("keydown", (event) => {
 });
 
 elements.nextStage.addEventListener("click", () => {
+  if (sentenceSession) {
+    const next = advanceSentence(sentenceSession);
+    if (next) {
+      sentenceSession = next;
+      void loadSentenceCharacter();
+      return;
+    }
+    const count = sentenceSession.characters.length;
+    void recordCurrentAttempt("cleared");
+    endSentencePractice();
+    elements.nextStage.hidden = true;
+    setCoachMessage(`문장의 ${count}글자를 모두 연습했어요! 다른 단계로 다시 도전해 보세요.`, "success", "★");
+    return;
+  }
+  const next = nextStageAfter(stage);
+  if (!next) return;
   void recordCurrentAttempt("cleared");
-  setStage(2);
-  resetVisibleAttempt("모양을 기억해 써 보세요. 막히면 한 획 보기로 도움을 받을 수 있습니다.");
+  setStage(next);
+  resetVisibleAttempt(stageConfig(next).startMessage);
   elements.canvas.focus({ preventScroll: true });
 });
 
+document.getElementById("sentence-exit").addEventListener("click", () => {
+  endSentencePractice();
+  setCoachMessage("문장 연습을 그만뒀어요. 지금 글자는 계속 연습할 수 있어요.", "success", "○");
+});
+
 elements.hint.addEventListener("click", () => {
-  if (stage !== 2 || !template) return;
+  if (!stageConfig(stage).hintButton || !template) return;
   hintReveal = advanceHint(hintReveal, coach.expectedTemplateIndex, template.length);
   lastReport = null;
   elements.result.replaceChildren();
@@ -1516,10 +1602,10 @@ function renderScoreReport(body) {
   if (corrections.length === 0) {
     html += '<div class="msg">교정할 획이 없습니다 — 잘 썼습니다!</div>';
   }
-  if (stage === 1) {
-    elements.nextStage.hidden = false;
-    html += '<div class="msg"><b>1단계 완료</b> — <b>2단계로 넘어가기</b>를 누르면 '
-      + '원하는 위치와 크기에서 모양을 기억해 씁니다. 막히면 <b>한 획 보기</b>를 쓸 수 있어요.</div>';
+  showNextStep();
+  if (stage === 1 && !sentenceSession) {
+    html += '<div class="msg"><b>1단계 완료</b> — <b>2단계</b>에서는 다음 획의 시작점과 방향만 보고, '
+      + '<b>3단계</b>에서는 가이드 없이 원하는 위치와 크기로 씁니다.</div>';
   }
   elements.result.innerHTML = html;
 }
@@ -1547,7 +1633,7 @@ document.getElementById("go").addEventListener("click", async () => {
       {
         char: character,
         strokes: toLegacyStrokes(strokes),
-        mode: stage === 1 ? "trace" : "recall",
+        mode: stageConfig(stage).coachMode,
       },
       { signal: token.controller.signal },
     );
@@ -1597,8 +1683,13 @@ const learningPanel = new LearningPanel({
   onVariant(variantId) { void loadTemplate({ variantId }); },
   onMode(nextStage) {
     void recordCurrentAttempt("cleared");
+    sentenceSession = withSentenceStage(sentenceSession, nextStage);
+    renderSentenceProgress();
     setStage(nextStage);
-    resetVisibleAttempt(nextStage === 1 ? "선택한 획순 경로를 따라 써 보세요." : "모양을 기억해 써 보세요. 한 획 보기로 도움을 받을 수 있습니다.");
+    resetVisibleAttempt(stageConfig(stage).startMessage);
+  },
+  onSentencePractice(characters, chosenStage, entryId) {
+    startSentence(characters, chosenStage, entryId);
   },
 });
 void learningPanel.load().then((pack) => {
