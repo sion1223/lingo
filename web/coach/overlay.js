@@ -65,7 +65,7 @@ export class CoachOverlay {
     context.lineCap = "round";
     context.lineJoin = "round";
     context.lineWidth = 5;
-    context.strokeStyle = "#b42318";
+    context.strokeStyle = "#ea2b2b";
     drawPath(context, diagnosis.overlay.problemSegment, this.size);
     context.setLineDash([7, 6]);
     context.lineWidth = 3;
@@ -84,7 +84,7 @@ export class CoachOverlay {
 
     if (diagnosis.primaryCue) {
       context.lineWidth = 5;
-      context.strokeStyle = diagnosis.accepted ? "#9a6700" : "#b42318";
+      context.strokeStyle = diagnosis.accepted ? "#9a6700" : "#ea2b2b";
       drawPath(context, diagnosis.overlay?.problemSegment, this.size);
       context.setLineDash([7, 6]);
       context.lineWidth = 3;
@@ -92,7 +92,7 @@ export class CoachOverlay {
       drawPath(context, diagnosis.overlay?.targetSegment, this.size);
       context.setLineDash([]);
       context.lineWidth = 3;
-      context.strokeStyle = "#175cd3";
+      context.strokeStyle = "#1899d6";
       drawArrow(
         context,
         diagnosis.primaryCue.anchor,
@@ -105,14 +105,14 @@ export class CoachOverlay {
     if (nextStart) {
       const x = nextStart.x * this.size;
       const y = nextStart.y * this.size;
-      context.fillStyle = "rgba(23, 92, 211, 0.12)";
-      context.strokeStyle = "#175cd3";
+      context.fillStyle = "rgba(28, 176, 246, 0.14)";
+      context.strokeStyle = "#1899d6";
       context.lineWidth = 3;
       context.beginPath();
       context.arc(x, y, 10, 0, Math.PI * 2);
       context.fill();
       context.stroke();
-      context.fillStyle = "#175cd3";
+      context.fillStyle = "#1899d6";
       context.font = "600 12px sans-serif";
       context.fillText("다음", x + 14, y + 4);
     }

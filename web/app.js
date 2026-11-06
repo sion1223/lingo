@@ -549,8 +549,8 @@ function drawStrokeOrderGuide(
   const headSpread = 0.58;
 
   inkContext.save();
-  inkContext.strokeStyle = "rgba(23, 92, 211, 0.88)";
-  inkContext.fillStyle = "rgba(23, 92, 211, 0.88)";
+  inkContext.strokeStyle = "rgba(24, 153, 214, 0.92)";
+  inkContext.fillStyle = "rgba(24, 153, 214, 0.92)";
   inkContext.lineWidth = Math.max(2.2, width * 0.42);
   inkContext.lineCap = "round";
   inkContext.setLineDash([]);
@@ -575,10 +575,10 @@ function drawStrokeOrderGuide(
   inkContext.arc(startX, startY, badgeRadius, 0, Math.PI * 2);
   inkContext.fillStyle = "rgba(255, 255, 255, 0.94)";
   inkContext.fill();
-  inkContext.strokeStyle = "rgba(23, 92, 211, 0.88)";
+  inkContext.strokeStyle = "rgba(24, 153, 214, 0.92)";
   inkContext.lineWidth = 1.4;
   inkContext.stroke();
-  inkContext.fillStyle = "#174b9b";
+  inkContext.fillStyle = "#0f6e9e";
   inkContext.font = `700 ${Math.max(9, Math.min(12, badgeRadius * 1.25))}px sans-serif`;
   inkContext.textAlign = "center";
   inkContext.textBaseline = "middle";
@@ -587,9 +587,9 @@ function drawStrokeOrderGuide(
 }
 
 function qualityColor(quality) {
-  if (quality > 0.7) return "#128a44";
-  if (quality > 0.4) return "#9a6700";
-  return "#b42318";
+  if (quality > 0.7) return "#58a700";
+  if (quality > 0.4) return "#d69a00";
+  return "#ea2b2b";
 }
 
 function completedRecallWriting() {
@@ -605,7 +605,7 @@ function completedRecallWriting() {
 function drawCompletedRecallReference(referenceTemplate) {
   for (let index = 0; index < referenceTemplate.length; index += 1) {
     drawStrokeOrderGuide(referenceTemplate[index], index + 1, {
-      color: "rgba(23, 92, 211, 0.48)",
+      color: "rgba(24, 153, 214, 0.5)",
       width: 3,
       dash: [8, 6],
     });
@@ -615,7 +615,7 @@ function drawCompletedRecallReference(referenceTemplate) {
 function redrawInk() {
   if (!canvasSize) return;
   inkContext.clearRect(0, 0, canvasSize, canvasSize);
-  inkContext.strokeStyle = "#dedbd4";
+  inkContext.strokeStyle = "#e5e5e5";
   inkContext.lineWidth = 1;
   inkContext.setLineDash([6, 6]);
   inkContext.beginPath();
@@ -648,7 +648,7 @@ function redrawInk() {
     if (lastReport.missing && referenceTemplate) {
       for (const missingIndex of lastReport.missing) {
         if (referenceTemplate[missingIndex]) {
-          drawStroke(referenceTemplate[missingIndex], "#175cd3", 4, [8, 6]);
+          drawStroke(referenceTemplate[missingIndex], "#1899d6", 4, [8, 6]);
         }
       }
     }
@@ -656,8 +656,8 @@ function redrawInk() {
     return;
   }
 
-  for (const stroke of strokes) drawStroke(stroke, "#2b2925", 5);
-  if (currentStroke) drawStroke(currentStroke, "#2b2925", 5);
+  for (const stroke of strokes) drawStroke(stroke, "#3c3c3c", 5);
+  if (currentStroke) drawStroke(currentStroke, "#3c3c3c", 5);
   if (completedRecallWriting()) drawCompletedRecallReference(referenceTemplate);
 }
 
