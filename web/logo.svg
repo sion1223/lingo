@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+  <title>링고</title>
+  <rect x="2" y="4" width="60" height="58" rx="17" fill="#58A700"/>
+  <rect x="2" y="2" width="60" height="56" rx="17" fill="#58CC02"/>
+  <path d="M18 17H43.5V29.5H20.5V42H46" stroke="#FFFFFF" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="18" cy="17" r="6" fill="#1CB0F6" stroke="#FFFFFF" stroke-width="2.5"/>
+  <path d="M51 7.5L52.4 10.6L55.5 12L52.4 13.4L51 16.5L49.6 13.4L46.5 12L49.6 10.6Z" fill="#FFC800"/>
+</svg>

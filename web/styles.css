@@ -638,7 +638,7 @@ button:disabled, select:disabled { border-color: var(--line-200); background: va
 #scoring-scope { margin: 8px 0; }
 .asset-attribution { max-width: 520px; font-size: 11px; line-height: 1.6; margin: 14px 0; color: var(--ink-600); }
 .study-header { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: 12px; padding: 6px max(0px, calc((100% - 520px) / 2)) 8px; background: var(--surface-0); }
-.brand { flex: 0 0 auto; color: var(--green-600); font-size: 24px; font-weight: 900; letter-spacing: -0.02em; }
+.brand { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; color: var(--green-600); font-size: 24px; font-weight: 900; letter-spacing: -0.02em; }
 #study-toggle { display: flex; flex: 1; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; min-height: 60px; padding: 8px 14px; text-align: left; }
 .current-practice { display: flex; align-items: center; gap: 12px; min-width: 0; }
 #active-character { font-size: 30px; font-weight: 700; line-height: 1; }
@@ -677,6 +677,7 @@ button:disabled, select:disabled { border-color: var(--line-200); background: va
 .writing-actions #hint:not(:disabled) { color: var(--blue-600); }
 @media (max-width: 420px) {
   /* 좁은 화면에서는 글자 뜻을 우선 보여 주고, 설정 문구는 화면 읽기 프로그램에만 남긴다 */
+  .brand { font-size: 0; gap: 0; }
   #study-toggle-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 @media (max-width: 780px) {
