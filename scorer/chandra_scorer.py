@@ -18,25 +18,47 @@ from .render import render_time_encoded, masks_to_grid
 CHANDRA_ID = 'datalab-to/chandra'
 
 
+# qwen3vl 계열 체크포인트의 비전 가중치 접두사 (구버전 호환: 'visual.')
+VISION_WEIGHT_PREFIXES = ('model.visual.', 'visual.')
+
+
+def _vision_state_dict(model_id):
+    """비전 가중치가 든 safetensors 샤드만 받아 'visual.' 텐서만 읽는다.
+
+    Chandra 비전 가중치는 첫 샤드(5GB)에만 있으므로 8B 전체(약 17GB)를
+    받거나 RAM 에 올릴 필요가 없다 — 4GB 노트북 GPU 에서도 서빙 가능.
+    """
+    import json
+    from huggingface_hub import hf_hub_download
+    from safetensors import safe_open
+    index_path = hf_hub_download(model_id, 'model.safetensors.index.json')
+    with open(index_path, encoding='utf-8') as f:
+        weight_map = json.load(f)['weight_map']
+    prefix = next((p for p in VISION_WEIGHT_PREFIXES
+                   if any(k.startswith(p) for k in weight_map)), None)
+    if prefix is None:
+        raise ValueError(f'{model_id}: 비전 타워 가중치를 찾지 못했습니다')
+    shards = sorted({s for k, s in weight_map.items() if k.startswith(prefix)})
+    state = {}
+    for shard in shards:
+        with safe_open(hf_hub_download(model_id, shard), framework='pt') as f:
+            for key in f.keys():
+                if key.startswith(prefix):
+                    state[key[len(prefix):]] = f.get_tensor(key)
+    return state
+
+
 def _load_vision_tower(model_id, dtype):
-    """Chandra 전체를 로드하지 않고 비전 타워만 떼어낸다."""
-    import gc
-    from transformers import AutoConfig, AutoModelForImageTextToText, AutoProcessor
+    """Chandra 전체를 로드하지 않고 비전 타워만 설정에서 조립해 가중치를 채운다."""
+    from transformers import AutoConfig, AutoProcessor
+    from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLVisionModel
     processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
-    full = AutoModelForImageTextToText.from_pretrained(
-        model_id, torch_dtype=dtype, trust_remote_code=True,
-        low_cpu_mem_usage=True)
-    # qwen3vl 계열: full.model.visual (구버전 호환: full.visual)
-    visual = getattr(getattr(full, 'model', full), 'visual', None)
-    if visual is None:
-        visual = full.visual
     cfg = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+    visual = Qwen3VLVisionModel._from_config(cfg.vision_config, torch_dtype=dtype)
+    visual.load_state_dict(_vision_state_dict(model_id), strict=True)
+    visual.eval()
     vis_dim = getattr(cfg.vision_config, 'out_hidden_size',
                       getattr(cfg.vision_config, 'hidden_size', None))
-    del full  # LLM 부분 메모리 해제 (visual 은 참조 유지)
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
     return visual, processor, int(vis_dim)
 
 
