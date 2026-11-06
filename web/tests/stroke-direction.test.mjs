@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { strokeDirectionMarker } from "../coach/stroke-direction.js";
+import { strokeDirectionMarker, strokeStartDirection } from "../coach/stroke-direction.js";
 
 test("direction marker follows a left-to-right stroke", () => {
   const marker = strokeDirectionMarker([[0.1, 0.4], [0.9, 0.4]]);
@@ -29,4 +29,16 @@ test("direction marker ignores a degenerate or invalid stroke", () => {
   assert.equal(strokeDirectionMarker([[0.2, 0.2]]), null);
   assert.equal(strokeDirectionMarker([[0.2, 0.2], [0.2, 0.2]]), null);
   assert.equal(strokeDirectionMarker([[0.2, 0.2], [Number.NaN, 0.3]]), null);
+});
+
+test("start direction points the way the stroke leaves its start", () => {
+  const down = strokeStartDirection([[0.5, 0.1], [0.5, 0.3], [0.8, 0.3]]);
+  assert.ok(Math.abs(down.unit[0]) < 1e-9);
+  assert.ok(Math.abs(down.unit[1] - 1) < 1e-9);
+
+  const left = strokeStartDirection([{ x: 0.8, y: 0.5 }, { x: 0.79, y: 0.5 }, { x: 0.2, y: 0.5 }]);
+  assert.ok(left.unit[0] < -0.99);
+
+  assert.equal(strokeStartDirection([[0.2, 0.2], [0.2, 0.2]]), null);
+  assert.equal(strokeStartDirection([[0.2, 0.2]]), null);
 });

@@ -4,13 +4,19 @@ import { LearningPanel } from "./learning-panel.js";
 import { advanceHint, hintedStrokeIndexes, NO_HINT } from "./hint-reveal.js";
 import {
   advanceSentence,
-  autoHintStrokeIndex,
   GUIDE_FULL,
+  GUIDE_MASKED,
+  hasNextMaskRound,
+  nextMaskRound,
   nextStageAfter,
   nextStepLabel,
+  passesStage,
+  rewindStrokeIndex,
   sentenceCharacter,
   sentenceProgressLabel,
+  STAGE2_PASS_SCORE,
   stageConfig,
+  startMaskRounds,
   startSentencePractice,
   withSentenceStage,
 } from "./practice-stages.js";
@@ -40,7 +46,7 @@ import { clamp, distance, toXY } from "./coach/metrics.js";
 import { CoachOverlay } from "./coach/overlay.js";
 import { bindStrokeEndEvents } from "./coach/pointer-boundary.js";
 import { fitTemplateToWriting } from "./coach/template-fit.js";
-import { strokeDirectionMarker } from "./coach/stroke-direction.js";
+import { strokeDirectionMarker, strokeStartDirection } from "./coach/stroke-direction.js";
 import {
   buildCoachPayload,
   chooseHigherConfidence,
@@ -118,6 +124,7 @@ let lastReport = null;
 let penSeen = false;
 let stage = 1;
 let sentenceSession = null;
+let maskRounds = null;
 let hintReveal = NO_HINT;
 let framePending = false;
 let lastPartialAnalysisAt = Number.NEGATIVE_INFINITY;
@@ -489,6 +496,7 @@ function setStage(nextStage) {
   stage = config.stage;
   document.getElementById("practice-mode").value = String(stage);
   hintReveal = NO_HINT;
+  maskRounds = null;
   coach.setMode(config.coachMode);
   document.body.dataset.practiceMode = config.coachMode;
   document.body.dataset.practiceStage = String(stage);
@@ -501,7 +509,7 @@ function setStage(nextStage) {
 
 // The button after a finished character: next stage, or next sentence character.
 function showNextStep() {
-  const label = nextStepLabel(stage, sentenceSession);
+  const label = nextStepLabel(stage, sentenceSession, maskRounds);
   elements.nextStage.hidden = !label;
   if (label) elements.nextStage.textContent = label;
 }
@@ -538,6 +546,39 @@ function endSentencePractice() {
   if (!elements.nextStage.hidden) showNextStep();
 }
 
+// Stage 2 keeps one random mask per round; it is rebuilt when the stroke count changes.
+function currentMaskVisibleIndexes() {
+  if (stageConfig(stage).guide !== GUIDE_MASKED || !template?.length) return [];
+  if (!maskRounds || maskRounds.strokeCount !== template.length) {
+    maskRounds = startMaskRounds(template.length);
+  }
+  return maskRounds.visible;
+}
+
+// Stage 2 moves on only after a final score of STAGE2_PASS_SCORE or more,
+// unless this form cannot be scored remotely.
+function needsPassingScore() {
+  return stageConfig(stage).passScore != null && allowsRemoteScoring(templateVariant);
+}
+
+function rewindToStroke(index, message = `${index + 1}번 획부터 다시 써 보세요.`) {
+  if (!Number.isInteger(index) || index < 0) return;
+  while (strokes.length > index) {
+    markLastStrokeUndone(attemptStrokeResults, strokes.length - 1);
+    strokes.pop();
+    coach.undoLast();
+  }
+  clearTeacherState({ clearContext: true, resetHistory: true });
+  lastReport = null;
+  elements.result.replaceChildren();
+  elements.nextStage.hidden = true;
+  elements.busyOverlay.style.display = "none";
+  coachOverlay.clear();
+  setCoachMessage(message, "nudge", "↶");
+  redrawInk();
+  void saveCurrentAttemptLocally();
+}
+
 function configureCanvases() {
   canvasSize = Math.min(document.getElementById("practice-workspace").clientWidth, 520);
   const devicePixelRatio = window.devicePixelRatio || 1;
@@ -568,16 +609,15 @@ function drawStroke(points, color, width, dash = []) {
   inkContext.setLineDash([]);
 }
 
+// Length of the arrow beside each stroke-number badge, in badge radii.
+const BADGE_ARROW_LENGTH = 1.9;
+
 function drawStrokeOrderGuide(
   points,
   order,
-  {
-    color = "rgba(96, 103, 113, 0.24)", width = 7, dash = [], displayPath = null, markerOnly = false,
-  } = {},
+  { color = "rgba(96, 103, 113, 0.24)", width = 7, dash = [], displayPath = null } = {},
 ) {
-  if (markerOnly) {
-    // Stage 2 hint: only the start badge and direction arrow, never the stroke path.
-  } else if (displayPath && templateDisplay && typeof Path2D !== "undefined") {
+  if (displayPath && templateDisplay && typeof Path2D !== "undefined") {
     // Draw the real curve in the same frame as the 12-point scoring template.
     // Font glyphs never enter this canvas or the coach's stroke data.
     inkContext.save();
@@ -625,6 +665,33 @@ function drawStrokeOrderGuide(
   );
   inkContext.closePath();
   inkContext.fill();
+
+  const startDirection = strokeStartDirection(points);
+  if (startDirection) {
+    // Short arrow glued to the number badge: which way to go from the start.
+    const [unitX, unitY] = startDirection.unit;
+    const fromX = startX + unitX * (badgeRadius + 1);
+    const fromY = startY + unitY * (badgeRadius + 1);
+    const toX = startX + unitX * badgeRadius * (1 + BADGE_ARROW_LENGTH);
+    const toY = startY + unitY * badgeRadius * (1 + BADGE_ARROW_LENGTH);
+    const badgeHead = headLength * 0.85;
+    inkContext.beginPath();
+    inkContext.moveTo(fromX, fromY);
+    inkContext.lineTo(toX, toY);
+    inkContext.stroke();
+    inkContext.beginPath();
+    inkContext.moveTo(toX, toY);
+    inkContext.lineTo(
+      toX - Math.cos(startDirection.angle - headSpread) * badgeHead,
+      toY - Math.sin(startDirection.angle - headSpread) * badgeHead,
+    );
+    inkContext.lineTo(
+      toX - Math.cos(startDirection.angle + headSpread) * badgeHead,
+      toY - Math.sin(startDirection.angle + headSpread) * badgeHead,
+    );
+    inkContext.closePath();
+    inkContext.fill();
+  }
 
   inkContext.beginPath();
   inkContext.arc(startX, startY, badgeRadius, 0, Math.PI * 2);
@@ -688,17 +755,14 @@ function redrawInk() {
   if (referenceTemplate) {
     const visibleIndexes = fullGuide
       ? template.map((_stroke, index) => index)
-      : hintedStrokeIndexes(hintReveal, template.length);
+      : [...new Set([
+        ...currentMaskVisibleIndexes(),
+        ...hintedStrokeIndexes(hintReveal, template.length),
+      ])];
     for (const index of visibleIndexes) {
       drawStrokeOrderGuide(referenceTemplate[index], index + 1, {
         displayPath: fullGuide ? templateDisplay?.paths[index] : null,
       });
-    }
-    const autoHint = lastReport
-      ? null
-      : autoHintStrokeIndex(stage, coach.expectedTemplateIndex, template.length);
-    if (autoHint !== null && !visibleIndexes.includes(autoHint)) {
-      drawStrokeOrderGuide(referenceTemplate[autoHint], autoHint + 1, { markerOnly: true });
     }
   }
 
@@ -783,7 +847,15 @@ function renderDiagnosis(diagnosis, { autoRetry = false } = {}) {
         "success",
         "✓",
       );
-      showNextStep();
+      if (needsPassingScore()) {
+        setCoachMessage(
+          `글자를 완성했어요. 채점하기에서 ${STAGE2_PASS_SCORE}점 이상이면 다음으로 넘어가요.`,
+          "success",
+          "✓",
+        );
+      } else {
+        showNextStep();
+      }
     } else {
       setCoachMessage(
         `좋아요. ${diagnosis.nextAction.templateIndex + 1}번 획을 이어서 써 보세요.`,
@@ -1144,19 +1216,7 @@ bindStrokeEndEvents(elements.canvas, endStroke);
 
 document.getElementById("undo").addEventListener("click", () => {
   if (!strokes.length) return;
-  const removedStrokeIndex = strokes.length - 1;
-  markLastStrokeUndone(attemptStrokeResults, removedStrokeIndex);
-  strokes.pop();
-  coach.undoLast();
-  clearTeacherState({ clearContext: true, resetHistory: true });
-  lastReport = null;
-  elements.result.replaceChildren();
-  elements.nextStage.hidden = true;
-  elements.busyOverlay.style.display = "none";
-  coachOverlay.clear();
-  setCoachMessage("마지막 획을 지웠어요. 같은 획부터 다시 써 보세요.", "nudge", "↶");
-  redrawInk();
-  void saveCurrentAttemptLocally();
+  rewindToStroke(strokes.length - 1, "마지막 획을 지웠어요. 같은 획부터 다시 써 보세요.");
 });
 
 document.getElementById("clear").addEventListener("click", () => {
@@ -1178,6 +1238,16 @@ elements.character.addEventListener("keydown", (event) => {
 });
 
 elements.nextStage.addEventListener("click", () => {
+  if (stageConfig(stage).guide === GUIDE_MASKED && hasNextMaskRound(maskRounds)) {
+    maskRounds = nextMaskRound(maskRounds);
+    void recordCurrentAttempt("cleared");
+    resetVisibleAttempt(
+      `새 마스크 ${maskRounds.round + 1}/${maskRounds.total}: 다른 획이 가려졌어요. `
+      + `다시 ${STAGE2_PASS_SCORE}점 이상에 도전해 보세요.`,
+    );
+    elements.canvas.focus({ preventScroll: true });
+    return;
+  }
   if (sentenceSession) {
     const next = advanceSentence(sentenceSession);
     if (next) {
@@ -1197,6 +1267,13 @@ elements.nextStage.addEventListener("click", () => {
   void recordCurrentAttempt("cleared");
   setStage(next);
   resetVisibleAttempt(stageConfig(next).startMessage);
+  elements.canvas.focus({ preventScroll: true });
+});
+
+elements.result.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-rewind]");
+  if (!item) return;
+  rewindToStroke(Number(item.dataset.rewind));
   elements.canvas.focus({ preventScroll: true });
 });
 
@@ -1590,6 +1667,14 @@ function renderScoreReport(body) {
     : `모델 점수 ${escapeHtml(body.base_model_score)}`;
   let html = `<div id="score-big">${escapeHtml(body.score)}점</div>`
     + `<div id="score-sub">${scoreDetails} · ${escapeHtml(body.elapsed)}초</div>`;
+  const gated = needsPassingScore();
+  const passed = passesStage(stage, body.score);
+  if (gated) {
+    html += passed
+      ? `<div class="msg msg-pass"><b>통과!</b> — ${STAGE2_PASS_SCORE}점 이상이에요. 다음으로 넘어가세요.</div>`
+      : `<div class="msg msg-retry"><b>${STAGE2_PASS_SCORE}점 이상이면 통과</b> — `
+        + "아래 교정 항목을 누르면 그 획부터 다시 쓸 수 있어요.</div>";
+  }
   const corrections = body.corrections || [];
   for (const correction of corrections) {
     const label = correctionLabel(correction);
@@ -1597,12 +1682,18 @@ function renderScoreReport(body) {
       ? ` (+${Number(correction.gain).toFixed(1)}점 기대)`
       : "";
     const messages = (correction.messages || []).map(escapeHtml).join(" · ");
-    html += `<div class="msg"><b>${escapeHtml(label + gain)}</b> — ${messages}</div>`;
+    const text = `<b>${escapeHtml(label + gain)}</b> — ${messages}`;
+    const target = rewindStrokeIndex(correction, strokes.length);
+    html += target === null
+      ? `<div class="msg">${text}</div>`
+      : `<button type="button" class="msg msg-rewind" data-rewind="${target}">${text}`
+        + `<span class="rewind-hint">↶ ${target + 1}번 획부터 다시 쓰기</span></button>`;
   }
   if (corrections.length === 0) {
     html += '<div class="msg">교정할 획이 없습니다 — 잘 썼습니다!</div>';
   }
-  showNextStep();
+  if (gated && !passed) elements.nextStage.hidden = true;
+  else showNextStep();
   if (stage === 1 && !sentenceSession) {
     html += '<div class="msg"><b>1단계 완료</b> — <b>2단계</b>에서는 다음 획의 시작점과 방향만 보고, '
       + '<b>3단계</b>에서는 가이드 없이 원하는 위치와 크기로 씁니다.</div>';
@@ -1646,6 +1737,7 @@ document.getElementById("go").addEventListener("click", async () => {
         body.message || body.detail || `오류: ${status}`,
       )}</div>`;
       setCoachMessage("최종 채점은 연결되지 않았지만 로컬 코치는 계속 동작합니다.", "nudge", "↯");
+      if (needsPassingScore() && completedRecallWriting()) showNextStep();
       return;
     }
     coach.finishFinalScore(token, true);
@@ -1666,6 +1758,7 @@ document.getElementById("go").addEventListener("click", async () => {
     void recordCurrentAttempt("score_failed");
     elements.result.innerHTML = '<div class="msg">네트워크 오류 — 로컬 코치는 계속 사용할 수 있습니다.</div>';
     setCoachMessage("서버 없이도 획별 로컬 교정은 계속 받을 수 있습니다.", "nudge", "↯");
+    if (needsPassingScore() && completedRecallWriting()) showNextStep();
   }
 });
 

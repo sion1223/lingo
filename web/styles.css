@@ -342,6 +342,12 @@ button:focus-visible, input:focus-visible { outline: none; box-shadow: var(--foc
 }
 
 .msg b { color: var(--blue-600); font-weight: 900; }
+.msg-rewind { display: block; width: 100%; min-height: 0; text-align: left; color: var(--ink-900); cursor: pointer; }
+.msg-rewind:hover { border-color: var(--blue-500); background: var(--blue-100); }
+.rewind-hint { display: block; margin-top: 4px; color: var(--blue-700); font-size: 13px; font-weight: 800; }
+.msg-pass { border-color: var(--green-500); background: #d7ffb8; }
+.msg-pass b { color: var(--green-600); }
+.msg-retry { border-color: var(--gold-500); }
 
 #picker {
   position: fixed;

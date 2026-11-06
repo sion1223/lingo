@@ -54,3 +54,29 @@ export function strokeDirectionMarker(points, fraction = 0.62) {
     angle: Math.atan2(unit[1], unit[0]),
   };
 }
+
+// Direction a stroke leaves its start point, measured a short way along the
+// path so a tiny hook at the start does not flip the arrow by the number badge.
+export function strokeStartDirection(points, lookahead = 0.05) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  let start;
+  try {
+    start = toXY(points[0]);
+    let traversed = 0;
+    let previous = start;
+    let target = null;
+    for (const point of points.slice(1)) {
+      const next = toXY(point);
+      traversed += distance(previous, next);
+      previous = next;
+      target = next;
+      if (traversed >= lookahead) break;
+    }
+    const length = target ? distance(start, target) : 0;
+    if (!(length > EPSILON)) return null;
+    const unit = [(target[0] - start[0]) / length, (target[1] - start[1]) / length];
+    return { unit, angle: Math.atan2(unit[1], unit[0]) };
+  } catch {
+    return null;
+  }
+}
