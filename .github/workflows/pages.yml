@@ -2,7 +2,7 @@ name: Deploy web to GitHub Pages
 
 on:
   push:
-    branches: [codex/confusion-c0-baseline-20260809]
+    branches: [main, codex/confusion-c0-baseline-20260809]
     paths:
       - "web/**"
       - "scripts/build_pages.py"
