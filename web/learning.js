@@ -94,8 +94,16 @@ export function kanaTable(group) {
   return rows;
 }
 
+const WRITABLE_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+
+// Writable characters in sentence order, repeats included (sentence practice).
+export function sentenceSequence(entry) {
+  return Array.from(entry?.text ?? "").filter((char) => WRITABLE_CHARACTER.test(char));
+}
+
+// Each writable character once (the character chips).
 export function practiceCharacters(entry) {
-  return [...new Set(Array.from(entry?.text ?? "").filter((char) => /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(char)))];
+  return [...new Set(sentenceSequence(entry))];
 }
 
 export function allowsRemoteScoring(variantId) {

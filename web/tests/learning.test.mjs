@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { allowsRemoteScoring, entriesForGroup, JLPT_NOTICE, LEARNING_ENTRIES, practiceCharacters, practiceForm } from "../learning.js";
+import { allowsRemoteScoring, entriesForGroup, JLPT_NOTICE, LEARNING_ENTRIES, practiceCharacters, practiceForm, sentenceSequence } from "../learning.js";
 import { fontSupports } from "../learning-panel.js";
 import { analyzeCompletedStroke } from "../coach/local-matcher.js";
 
@@ -37,6 +37,7 @@ test("every menu character has an offline practice template; phrases are not sen
     }
   }
   assert.deepEqual(practiceCharacters({ text: "水、水！" }), ["水"]);
+  assert.deepEqual(sentenceSequence({ text: "水と水、火！" }), ["水", "と", "水", "火"]);
 });
 
 test("reference forms and unknown variants cannot become a practice template or remote score", () => {

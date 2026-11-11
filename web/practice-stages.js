@@ -10,7 +10,7 @@ export const LAST_STAGE = 3;
 
 // Stage 2 shows a random part of the strokes; each mask must be scored at
 // least STAGE2_PASS_SCORE before the learner moves on.
-export const STAGE2_PASS_SCORE = 80;
+export const STAGE2_PASS_SCORE = 70;
 export const STAGE2_MASK_ROUNDS = 3;
 export const MASK_HIDDEN_RATIO = 0.5;
 const MASK_REROLL_ATTEMPTS = 6;
@@ -126,7 +126,8 @@ export function rewindStrokeIndex(correction, strokeCount) {
 }
 
 export function startSentencePractice(characters, stage, entryId = null) {
-  const queue = [...new Set(characters ?? [])].filter(Boolean);
+  // Sentence order, repeats included, so the whole sentence is written through.
+  const queue = [...(characters ?? [])].filter(Boolean);
   if (queue.length === 0) return null;
   return Object.freeze({
     characters: Object.freeze(queue),

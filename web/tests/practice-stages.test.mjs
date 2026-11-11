@@ -108,14 +108,16 @@ test("score feedback points back at the stroke to rewrite", () => {
   assert.equal(rewindStrokeIndex(null, 4), null);
 });
 
-test("sentence practice walks each character once at the chosen stage", () => {
+test("sentence practice walks the sentence in order, repeats included", () => {
   let session = startSentencePractice(["食", "べ", "食", "る"], 3, "entry-1");
-  assert.deepEqual(session.characters, ["食", "べ", "る"]);
+  assert.deepEqual(session.characters, ["食", "べ", "食", "る"]);
   assert.equal(session.stage, 3);
   assert.equal(sentenceCharacter(session), "食");
-  assert.equal(sentenceProgressLabel(session), "문장 연습 1/3 · 가리기");
+  assert.equal(sentenceProgressLabel(session), "문장 연습 1/4 · 가리기");
   assert.equal(nextStepLabel(3, session), "다음 글자 べ →");
 
+  session = advanceSentence(session);
+  assert.equal(nextStepLabel(3, session), "다음 글자 食 →");
   session = advanceSentence(advanceSentence(session));
   assert.equal(sentenceCharacter(session), "る");
   assert.equal(nextStepLabel(3, session), "문장 연습 마치기 ✓");

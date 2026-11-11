@@ -561,8 +561,11 @@ function needsPassingScore() {
   return stageConfig(stage).passScore != null && allowsRemoteScoring(templateVariant);
 }
 
-function rewindToStroke(index, message = `${index + 1}번 획부터 다시 써 보세요.`) {
+function rewindToStroke(index, message = null) {
   if (!Number.isInteger(index) || index < 0) return;
+  const text = message ?? (strokes.length > index
+    ? `${index + 1}번 획부터 다시 써 보세요.`
+    : `${index + 1}번 획부터 이어서 써 보세요.`);
   while (strokes.length > index) {
     markLastStrokeUndone(attemptStrokeResults, strokes.length - 1);
     strokes.pop();
@@ -574,7 +577,7 @@ function rewindToStroke(index, message = `${index + 1}번 획부터 다시 써 �
   elements.nextStage.hidden = true;
   elements.busyOverlay.style.display = "none";
   coachOverlay.clear();
-  setCoachMessage(message, "nudge", "↶");
+  setCoachMessage(text, "nudge", "↶");
   redrawInk();
   void saveCurrentAttemptLocally();
 }
@@ -1165,7 +1168,9 @@ elements.canvas.addEventListener("pointermove", (event) => {
   if (!currentStroke || event.pointerId !== currentPointerId) return;
   if (penSeen && event.pointerType === "touch") return;
   event.preventDefault();
-  const events = event.getCoalescedEvents ? event.getCoalescedEvents() : [event];
+  // Some browsers (and synthetic events) return an empty coalesced list.
+  const coalesced = event.getCoalescedEvents?.() ?? [];
+  const events = coalesced.length ? coalesced : [event];
   for (const coalescedEvent of events) pushPoint(coalescedEvent);
   scheduleDrawingFrame();
 });
@@ -1669,13 +1674,16 @@ function renderScoreReport(body) {
     + `<div id="score-sub">${scoreDetails} · ${escapeHtml(body.elapsed)}초</div>`;
   const gated = needsPassingScore();
   const passed = passesStage(stage, body.score);
+  const corrections = body.corrections || [];
+  const canRewind = corrections.some((correction) => rewindStrokeIndex(correction, strokes.length) !== null);
   if (gated) {
     html += passed
       ? `<div class="msg msg-pass"><b>통과!</b> — ${STAGE2_PASS_SCORE}점 이상이에요. 다음으로 넘어가세요.</div>`
       : `<div class="msg msg-retry"><b>${STAGE2_PASS_SCORE}점 이상이면 통과</b> — `
-        + "아래 교정 항목을 누르면 그 획부터 다시 쓸 수 있어요.</div>";
+        + (canRewind
+          ? "아래 교정 항목을 누르면 그 획부터 다시 쓸 수 있어요.</div>"
+          : "전체 모양을 조금 더 또박또박 써 보세요. 전체 지우기 후 다시 도전!</div>");
   }
-  const corrections = body.corrections || [];
   for (const correction of corrections) {
     const label = correctionLabel(correction);
     const gain = correction.gain != null && correction.gain > 0
@@ -1687,16 +1695,17 @@ function renderScoreReport(body) {
     html += target === null
       ? `<div class="msg">${text}</div>`
       : `<button type="button" class="msg msg-rewind" data-rewind="${target}">${text}`
-        + `<span class="rewind-hint">↶ ${target + 1}번 획부터 다시 쓰기</span></button>`;
+        + `<span class="rewind-hint">${target < strokes.length ? "↶" : "→"} ${target + 1}번 획부터 `
+        + `${target < strokes.length ? "다시" : "이어서"} 쓰기</span></button>`;
   }
-  if (corrections.length === 0) {
+  if (corrections.length === 0 && (!gated || passed)) {
     html += '<div class="msg">교정할 획이 없습니다 — 잘 썼습니다!</div>';
   }
   if (gated && !passed) elements.nextStage.hidden = true;
   else showNextStep();
   if (stage === 1 && !sentenceSession) {
-    html += '<div class="msg"><b>1단계 완료</b> — <b>2단계</b>에서는 다음 획의 시작점과 방향만 보고, '
-      + '<b>3단계</b>에서는 가이드 없이 원하는 위치와 크기로 씁니다.</div>';
+    html += '<div class="msg"><b>1단계 완료</b> — <b>2단계</b>에서는 무작위로 가려진 획을 기억해 쓰고 '
+      + `${STAGE2_PASS_SCORE}점 이상이면 통과해요. <b>3단계</b>에서는 가이드 없이 씁니다.</div>`;
   }
   elements.result.innerHTML = html;
 }
@@ -1807,5 +1816,6 @@ globalThis.__LINGO_TUTOR__ = {
   get attemptRevision() { return coach.lifecycle.revision; },
   get expectedTemplateIndex() { return coach.expectedTemplateIndex; },
   get templateVariant() { return templateVariant; },
+  get template() { return template; },
   states: TUTOR_STATES,
 };

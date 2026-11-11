@@ -8,6 +8,7 @@ import {
   LEARNING_GROUPS,
   LEARNING_SOURCES,
   practiceCharacters,
+  sentenceSequence,
 } from "./learning.js";
 
 const $ = (id) => document.getElementById(id);
@@ -214,7 +215,7 @@ export class LearningPanel {
   }
 
   sentenceCharacters(entry) {
-    return practiceCharacters(entry).filter((char) => this.canPractice(char, entry));
+    return sentenceSequence(entry).filter((char) => this.canPractice(char, entry));
   }
 
   toggleSentenceChoices(open = $("sentence-stage-choices").hidden) {
